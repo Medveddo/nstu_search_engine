@@ -4,24 +4,26 @@ from typing import List, Optional
 
 class Crawler:
     START_URL_LIST = [
-        "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0",
+        "https://nstu.ru/",
     ]
     DEFAULT_DEPTH = 2
-    
-    def __init__(self, url_list = START_URL_LIST, depth = DEFAULT_DEPTH) -> None:
+
+    def __init__(self, url_list=START_URL_LIST, depth=DEFAULT_DEPTH) -> None:
         self.urls_to_crawl = url_list
         self.depth = depth
-    
-    
+
+    def start_crawl():
+        pass
+
+
 class ParseUtils:
-    
     @staticmethod
     def get_all_urls(text: str, root_url: Optional[None] = None) -> List[str]:
         soup = BeautifulSoup(text, "html.parser")
         links = soup.find_all("a")
         if not root_url:
             return [link.get("href") for link in links]
-        
+
         href_list = []
 
         for link in links:
@@ -29,11 +31,39 @@ class ParseUtils:
             if href.startswith("http"):
                 href_list.append(href)
                 continue
+
+            continue
             href_list.append(f"{root_url}{href}")
 
         return href_list
-    
+
     @staticmethod
-    def get_test_only(text: str) -> str:
+    def get_text_only(text: str) -> str:
+        texts = ParseUtils._get_childs_texts(text)
+        return " ".join(texts)
+
+    @staticmethod
+    def get_separated_words(text: str) -> List[str]:
+        texts = ParseUtils._get_childs_texts(text)
+        separate_words = []
+        for element in texts:
+            separate_words.extend(element.split(" "))
+        print(separate_words)
+        return separate_words
+
+    @staticmethod
+    def _get_childs_texts(text: str) -> List[str]:
         soup = BeautifulSoup(text, "html.parser")
-        
+        texts = []
+        for element in soup.find_all():
+            if element.name == "script":
+                continue
+            try:
+                content = " ".join(element.contents)
+            except TypeError:
+                continue
+            if "<" not in content and ">" not in content:
+                text = element.text.strip().replace("\n", "")
+                if text:
+                    texts.append(text)
+        return texts
