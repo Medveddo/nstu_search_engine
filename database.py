@@ -1,15 +1,17 @@
+from re import L
 from typing import List
 from loguru import logger
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
-from entites import Word, Link
+from entites import Element, Word, Link
 from utils import Decorators
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///lab1.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 DbSession = sessionmaker(autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 class DbSelecter:
     SELECT_URL_LIST = """
@@ -83,7 +85,11 @@ class DbCreator:
 
 class DbActor:
     INSERT_INTO_URL_LIST = """
-    INSERT INTO url_list(url) VALUES('{url}')
+    INSERT INTO url_list(url) VALUES ('{url}')
+    """
+
+    INSERT_INTO_URL_LIST_TURBO = """
+    INSERT INTO url_list(url) VALUES {list_of_values}
     """
 
     INSERT_INTO_WORD_LIST = """
@@ -102,17 +108,49 @@ class DbActor:
     INSERT INTO link_between_url(fkFromUrlId, fkToUrlId) VALUES {list_of_values}
     """
 
+    INSERT_INTO_LINK_WORD = """
+    INSERT INTO link_word(fkWordId, fkLinkId) VALUES {list_of_values}
+    """
+
     SELECT_LAST_WORD_ID = """
     SELECT MAX(wordId) FROM word_list
     """
-    
+
+    SELECT_LAST_LINK_ID = """
+    SELECT MAX(urlId) FROM url_list
+    """
+
+    SELECT_TABLE_SIZE_STATS = """
+    SELECT COUNT(*), 'link_between' as temp_field FROM link_between_url 
+    UNION 
+    SELECT COUNT(*), 'link_word' as temp_field FROM link_word
+    UNION 
+    SELECT COUNT(*), 'url_list' as temp_field FROM url_list
+    UNION 
+    SELECT COUNT(*), 'word_list' as temp_field FROM word_list
+    UNION 
+    SELECT COUNT(*), 'word_location' as temp_field FROM word_location
+    """
+
     def __init__(self) -> None:
         self.db = DbSession()
+
     def close(self):
         self.db.close()
 
+    def get_stat(self):
+        result = self.db.execute(self.SELECT_TABLE_SIZE_STATS)
+        result = result.fetchall()
+        for row in result:
+            logger.error(f"{row[1]} \t\t {row[0]}")
+
     def _get_last_word_id(self) -> int:
         result = self.db.execute(self.SELECT_LAST_WORD_ID)
+        result = result.fetchone()[0]
+        return result
+
+    def _get_last_url_id(self) -> int:
+        result = self.db.execute(self.SELECT_LAST_LINK_ID)
         result = result.fetchone()[0]
         return result
 
@@ -131,9 +169,10 @@ class DbActor:
             last_word_id += 1
             word.id_ = last_word_id
         values_list = values_list.strip(",")
-        self.db.execute(self.INSERT_INTO_WORD_LIST_TURBO_FAST.format(list_of_values=values_list))
+        self.db.execute(
+            self.INSERT_INTO_WORD_LIST_TURBO_FAST.format(list_of_values=values_list)
+        )
         self.db.commit()
-        logger.critical(words[-2])
 
     def insert_url(self, url: str) -> int:
         query = self.INSERT_INTO_URL_LIST.format(url=url)
@@ -141,7 +180,7 @@ class DbActor:
         row_id = self._get_last_insert_rowid()
         self.db.commit()
         return row_id
-    
+
     @Decorators.timing
     def insert_word(self, word: str, is_filtered: int = 0) -> int:
         query = self.INSERT_INTO_WORD_LIST.format(word=word, is_filtered=is_filtered)
@@ -171,8 +210,78 @@ class DbActor:
         self.db.commit()
 
     def _get_last_insert_rowid(self) -> int:
-        return self.db.execute('SELECT last_insert_rowid();').fetchall()[0][0]
+        return self.db.execute("SELECT last_insert_rowid();").fetchall()[0][0]
 
-    
+    @Decorators.timing
+    def insert_links_from_elements(self, elements: List[Element]) -> None:
+        last_url_id = self._get_last_url_id()
+        list_of_values = ""
+        for element in elements:
+            if not element.href:
+                continue
+            list_of_values += f"('{element.href}'),"
+            last_url_id += 1
+            element.link_id = last_url_id
+        list_of_values = list_of_values.strip(",")
+        if not list_of_values:
+            return
+        self.db.execute(
+            self.INSERT_INTO_URL_LIST_TURBO.format(list_of_values=list_of_values)
+        )
+        self.db.commit()
 
-    
+    @Decorators.timing
+    def insert_words_from_elements(self, elements: List[Element]) -> None:
+        last_word_id = self._get_last_word_id() or 0
+        values_list = ""
+        for element in elements:
+            if not element.word:
+                continue
+            safe_word = element.word.replace("'", "")
+            values_list += f"('{safe_word}', 0),"
+            last_word_id += 1
+            element.word_id = last_word_id
+        values_list = values_list.strip(",")
+        self.db.execute(
+            self.INSERT_INTO_WORD_LIST_TURBO_FAST.format(list_of_values=values_list)
+        )
+        self.db.commit()
+
+    @Decorators.timing
+    def insert_links_between_by_elements(
+        self, elements: List[Element], original_link_id: int
+    ) -> None:
+        values_list = ""
+        for element in elements:
+            if not element.href:
+                continue
+            values_list += f"({original_link_id}, {element.link_id}),"
+        values_list = values_list.strip(",")
+        if not values_list:
+            return
+        query = self.INSERT_INTO_LINKS_BETWEEN.format(list_of_values=values_list)
+        self.db.execute(query)
+        self.db.commit()
+
+    @Decorators.timing
+    def fill_words_locations_by_elements(self, elements: List[Element], url_id: int):
+        values_list = ""
+        for element in elements:
+            values_list += f"({element.word_id}, {url_id}, {element.location}),"
+        values_list = values_list.strip(",")
+        query = self.INSERT_INTO_WORD_LOCATIONS.format(list_of_values=values_list)
+        self.db.execute(query)
+        self.db.commit()
+
+    @Decorators.timing
+    def fill_link_words_by_elements(self, elements: List[Element]):
+        list_of_values = ""
+        for element in elements:
+            if element.word and element.href:
+                list_of_values += f"({element.word_id}, {element.link_id}),"
+        list_of_values = list_of_values.strip(",")
+        if not list_of_values:
+            return
+        query = self.INSERT_INTO_LINK_WORD.format(list_of_values=list_of_values)
+        self.db.execute(query)
+        self.db.commit()
