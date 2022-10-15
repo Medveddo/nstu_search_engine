@@ -1,3 +1,6 @@
+from bs4 import BeautifulSoup
+from typing import List, Optional
+
 
 class Crawler:
     START_URL_LIST = [
@@ -10,4 +13,27 @@ class Crawler:
         self.depth = depth
     
     
+class ParseUtils:
     
+    @staticmethod
+    def get_all_urls(text: str, root_url: Optional[None] = None) -> List[str]:
+        soup = BeautifulSoup(text, "html.parser")
+        links = soup.find_all("a")
+        if not root_url:
+            return [link.get("href") for link in links]
+        
+        href_list = []
+
+        for link in links:
+            href: str = link.get("href")
+            if href.startswith("http"):
+                href_list.append(href)
+                continue
+            href_list.append(f"{root_url}{href}")
+
+        return href_list
+    
+    @staticmethod
+    def get_test_only(text: str) -> str:
+        soup = BeautifulSoup(text, "html.parser")
+        
