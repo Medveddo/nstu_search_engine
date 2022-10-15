@@ -5,13 +5,8 @@ from loguru import logger
 import requests
 from database import DbActor
 from dataclasses import dataclass
-
-@dataclass
-class Word:
-    word: str
-    location: int
-    id_: int = 0
-
+from entites import Word, Link
+from utils import Decorators
 class Crawler:
     START_URL_LIST = [
         "http://deb.debian.org/",
@@ -26,39 +21,43 @@ class Crawler:
     def start_crawl(self):
         self._crawl_iteration(self.urls_to_crawl.pop())
 
+    @staticmethod
+    @Decorators.timing
+    def _get_page(url: str) -> str:
+        response = requests.get(url)
+        return response.text
+
     def _crawl_iteration(self, url_to_process: str, current_depth = 0):
         logger.debug(f"Crawling {url_to_process} ...")
 
-
-        response = requests.get(url_to_process)
-        content = response.text
+        content = self._get_page(url_to_process)
 
         word_list = ParseUtils.get_separated_words(content)
-        links = ParseUtils.get_all_urls(content)
-
         word_list = [Word(word=word, location=i) for i, word in enumerate(word_list)]
         
         # 1
         # Добавляем ссылку в url_list
         current_url_id = self.db.insert_url(url_to_process)
-        logger.debug(f"{current_url_id=} {url_to_process=}")
+        # logger.debug(f"{current_url_id=} {url_to_process=}")
+        # 4
+        # Получаем все ссылки
+        links = ParseUtils.get_all_urls(content)
+        links = [Link(link=link) for link in links]
+        self.db.insert_urls(links)
 
         # 2
         # Вставляем все слова в word_list (filtered = 0)
-        words = []
-        for word in word_list:
-            id_ = self.db.insert_word(word.word)
-            word.id_ = id_
-        logger.debug(word_list)
+        self.db.insert_words(word_list)
+        # logger.debug(word_list)
+
         # 3 
         # Заполняем word_location
         # TODO: one insert with many VALUES
-
-        # 4
-        # Получаем все ссылки
+        self.db.fill_words_locations(word_list, url_id=current_url_id)
 
         # 5
         # Заполянем link_between_url
+        self.db.fill_links_between(links, current_url_id)
 
         # 6 
         # Заполняем link_word
@@ -72,6 +71,7 @@ class Crawler:
 
 class ParseUtils:
     @staticmethod
+    @Decorators.timing
     def get_all_urls(text: str, root_url: Optional[None] = None) -> List[str]:
         soup = BeautifulSoup(text, "html.parser")
         links = soup.find_all("a")
@@ -97,13 +97,14 @@ class ParseUtils:
         return " ".join(texts)
 
     @staticmethod
+    @Decorators.timing
     def get_separated_words(text: str) -> List[str]:
         texts = ParseUtils._get_childs_texts(text)
         separate_words = []
         for element in texts:
             separate_words.extend(element.split(" "))
         # print(separate_words)
-        return separate_words
+        return [word for word in separate_words if word]
 
     @staticmethod
     def _get_childs_texts(text: str) -> List[str]:

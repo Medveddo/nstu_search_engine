@@ -1,14 +1,15 @@
+from typing import List
 from loguru import logger
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
+from entites import Word, Link
+from utils import Decorators
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///lab1.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 DbSession = sessionmaker(autoflush=False, bind=engine)
 Base = declarative_base()
-
-
 
 class DbSelecter:
     SELECT_URL_LIST = """
@@ -88,11 +89,31 @@ class DbActor:
     INSERT_INTO_WORD_LIST = """
     INSERT INTO word_list(word, isFiltered) VALUES('{word}', {is_filtered})
     """
+
+    INSERT_INTO_WORD_LOCATIONS = """
+    INSERT INTO word_location(fkWordId, fkUrlId, location) VALUES {list_of_values}
+    """
+
+    INSERT_INTO_LINKS_BETWEEN = """
+    INSERT INTO link_between_url(fkFromUrlId, fkToUrlId) VALUES {list_of_values}
+    """
     
     def __init__(self) -> None:
         self.db = DbSession()
     def close(self):
         self.db.close()
+
+    @Decorators.timing
+    def insert_urls(self, links: List[Link]) -> None:
+        for link in links:
+            id_ = self.insert_url(link.link)
+            link.id_ = id_
+
+    @Decorators.timing
+    def insert_words(self, words: List[Word]) -> None:
+        for word in words:
+            id_ = self.insert_word(word.word)
+            word.id_ = id_
 
     def insert_url(self, url: str) -> int:
         query = self.INSERT_INTO_URL_LIST.format(url=url)
@@ -107,6 +128,26 @@ class DbActor:
         row_id = self._get_last_insert_rowid()
         self.db.commit()
         return row_id
+
+    @Decorators.timing
+    def fill_words_locations(self, words: List[Word], url_id: int):
+        values_list = ""
+        for word in words:
+            values_list += f"({word.id_}, {url_id}, {word.location}),"
+        values_list = values_list.strip(",")
+        query = self.INSERT_INTO_WORD_LOCATIONS.format(list_of_values=values_list)
+        self.db.execute(query)
+        self.db.commit()
+
+    @Decorators.timing
+    def fill_links_between(self, links: List[Link], original_link_id: int):
+        values_list = ""
+        for link in links:
+            values_list += f"({original_link_id}, {link.id_}),"
+        values_list = values_list.strip(",")
+        query = self.INSERT_INTO_LINKS_BETWEEN.format(list_of_values=values_list)
+        self.db.execute(query)
+        self.db.commit()
 
     def _get_last_insert_rowid(self) -> int:
         return self.db.execute('SELECT last_insert_rowid();').fetchall()[0][0]
