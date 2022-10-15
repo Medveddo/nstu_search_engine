@@ -87,7 +87,11 @@ class DbActor:
     """
 
     INSERT_INTO_WORD_LIST = """
-    INSERT INTO word_list(word, isFiltered) VALUES('{word}', {is_filtered})
+    INSERT INTO word_list(word, isFiltered) VALUES ('{word}', {is_filtered})
+    """
+
+    INSERT_INTO_WORD_LIST_TURBO_FAST = """
+    INSERT INTO word_list(word, isFiltered) VALUES {list_of_values}
     """
 
     INSERT_INTO_WORD_LOCATIONS = """
@@ -97,11 +101,20 @@ class DbActor:
     INSERT_INTO_LINKS_BETWEEN = """
     INSERT INTO link_between_url(fkFromUrlId, fkToUrlId) VALUES {list_of_values}
     """
+
+    SELECT_LAST_WORD_ID = """
+    SELECT MAX(wordId) FROM word_list
+    """
     
     def __init__(self) -> None:
         self.db = DbSession()
     def close(self):
         self.db.close()
+
+    def _get_last_word_id(self) -> int:
+        result = self.db.execute(self.SELECT_LAST_WORD_ID)
+        result = result.fetchone()[0]
+        return result
 
     @Decorators.timing
     def insert_urls(self, links: List[Link]) -> None:
@@ -111,9 +124,16 @@ class DbActor:
 
     @Decorators.timing
     def insert_words(self, words: List[Word]) -> None:
+        last_word_id = self._get_last_word_id()
+        values_list = ""
         for word in words:
-            id_ = self.insert_word(word.word)
-            word.id_ = id_
+            values_list += f"('{word.word}', 0),"
+            last_word_id += 1
+            word.id_ = last_word_id
+        values_list = values_list.strip(",")
+        self.db.execute(self.INSERT_INTO_WORD_LIST_TURBO_FAST.format(list_of_values=values_list))
+        self.db.commit()
+        logger.critical(words[-2])
 
     def insert_url(self, url: str) -> int:
         query = self.INSERT_INTO_URL_LIST.format(url=url)
@@ -122,6 +142,7 @@ class DbActor:
         self.db.commit()
         return row_id
     
+    @Decorators.timing
     def insert_word(self, word: str, is_filtered: int = 0) -> int:
         query = self.INSERT_INTO_WORD_LIST.format(word=word, is_filtered=is_filtered)
         self.db.execute(query)

@@ -18,6 +18,7 @@ class Crawler:
         self.depth = depth
         self.db = DbActor()
 
+    @Decorators.timing
     def start_crawl(self):
         self._crawl_iteration(self.urls_to_crawl.pop())
 
@@ -27,6 +28,7 @@ class Crawler:
         response = requests.get(url)
         return response.text
 
+    @Decorators.timing
     def _crawl_iteration(self, url_to_process: str, current_depth = 0):
         logger.debug(f"Crawling {url_to_process} ...")
 
