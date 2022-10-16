@@ -1,18 +1,5 @@
-
 from dataclasses import dataclass
 
-
-@dataclass
-class Word:
-    word: str
-    location: int
-    id_: int = 0
-
-@dataclass
-class Link:
-    link: str
-    text: str = ""
-    id_: int = 0
 
 @dataclass
 class Element:
@@ -21,6 +8,7 @@ class Element:
     word_id: int = 0
     href: str = ""
     link_id: int = 0
+
 
 @dataclass
 class LinkToGo:

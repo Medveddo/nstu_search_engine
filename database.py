@@ -1,22 +1,19 @@
-from re import L
-from typing import List
+import csv
+
+from typing import List, Tuple
 from loguru import logger
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
-from entites import Element, Word, Link
+from entites import Element
 from utils import Decorators
+
+from tabulate import tabulate
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///lab1.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 DbSession = sessionmaker(autoflush=False, bind=engine)
 Base = declarative_base()
-
-
-class DbSelecter:
-    SELECT_URL_LIST = """
-    SELECT * FROM url_list;
-    """
 
 
 class DbCreator:
@@ -138,11 +135,31 @@ class DbActor:
     def close(self):
         self.db.close()
 
-    def get_stat(self):
+    @staticmethod
+    def append_csv_stat(data: List[Tuple[str, int]], urls_crawled: int):
+        with open("stat.csv", "a") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(
+                (
+                    urls_crawled,
+                    data[0][1],
+                    data[1][1],
+                    data[2][1],
+                    data[3][1],
+                    data[4][1],
+                )
+            )
+
+    def get_stat(self, urls_crawled: int):
         result = self.db.execute(self.SELECT_TABLE_SIZE_STATS)
         result = result.fetchall()
+        data = []
         for row in result:
-            logger.error(f"{row[1]} \t\t {row[0]}")
+            data.append((row[1], row[0]))
+        logger.success(
+            f'\n\tCrawled count: {urls_crawled}\n{tabulate(data, headers=["table_name", "rows"])}'
+        )
+        self.append_csv_stat(data, urls_crawled)
 
     def _get_last_word_id(self) -> int:
         result = self.db.execute(self.SELECT_LAST_WORD_ID)
@@ -154,26 +171,6 @@ class DbActor:
         result = result.fetchone()[0]
         return result
 
-    @Decorators.timing
-    def insert_urls(self, links: List[Link]) -> None:
-        for link in links:
-            id_ = self.insert_url(link.link)
-            link.id_ = id_
-
-    @Decorators.timing
-    def insert_words(self, words: List[Word]) -> None:
-        last_word_id = self._get_last_word_id()
-        values_list = ""
-        for word in words:
-            values_list += f"('{word.word}', 0),"
-            last_word_id += 1
-            word.id_ = last_word_id
-        values_list = values_list.strip(",")
-        self.db.execute(
-            self.INSERT_INTO_WORD_LIST_TURBO_FAST.format(list_of_values=values_list)
-        )
-        self.db.commit()
-
     def insert_url(self, url: str) -> int:
         query = self.INSERT_INTO_URL_LIST.format(url=url)
         self.db.execute(query)
@@ -181,40 +178,12 @@ class DbActor:
         self.db.commit()
         return row_id
 
-    @Decorators.timing
-    def insert_word(self, word: str, is_filtered: int = 0) -> int:
-        query = self.INSERT_INTO_WORD_LIST.format(word=word, is_filtered=is_filtered)
-        self.db.execute(query)
-        row_id = self._get_last_insert_rowid()
-        self.db.commit()
-        return row_id
-
-    @Decorators.timing
-    def fill_words_locations(self, words: List[Word], url_id: int):
-        values_list = ""
-        for word in words:
-            values_list += f"({word.id_}, {url_id}, {word.location}),"
-        values_list = values_list.strip(",")
-        query = self.INSERT_INTO_WORD_LOCATIONS.format(list_of_values=values_list)
-        self.db.execute(query)
-        self.db.commit()
-
-    @Decorators.timing
-    def fill_links_between(self, links: List[Link], original_link_id: int):
-        values_list = ""
-        for link in links:
-            values_list += f"({original_link_id}, {link.id_}),"
-        values_list = values_list.strip(",")
-        query = self.INSERT_INTO_LINKS_BETWEEN.format(list_of_values=values_list)
-        self.db.execute(query)
-        self.db.commit()
-
     def _get_last_insert_rowid(self) -> int:
         return self.db.execute("SELECT last_insert_rowid();").fetchall()[0][0]
 
     @Decorators.timing
     def insert_links_from_elements(self, elements: List[Element]) -> None:
-        last_url_id = self._get_last_url_id()
+        last_url_id = self._get_last_url_id() or 0
         list_of_values = ""
         for element in elements:
             if not element.href:

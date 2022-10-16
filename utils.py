@@ -3,6 +3,7 @@ import time
 
 TIMING = False
 
+
 class Decorators:
     @staticmethod
     def timing(func):
@@ -13,6 +14,7 @@ class Decorators:
             end_time = time.perf_counter()
             total_time = end_time - start_time
             if TIMING:
-                print(f'Function {func.__name__} Took {total_time:.4f} seconds')
+                print(f"Function {func.__name__} Took {total_time:.4f} seconds")
             return result
+
         return timeit_wrapper
