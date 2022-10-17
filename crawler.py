@@ -154,7 +154,8 @@ class ParseUtils:
 
 
 class OmegaParser3000:
-    STRIP_CHARACTERS = ":,«».\"/()-!?'"
+    # STRIP_CHARACTERS = ":,«».\"/()-!?'"
+    STRIP_CHARACTERS = ":,«».\"/()-!?'0123456789"
 
     @classmethod
     def merge_text_and_links(
@@ -180,9 +181,6 @@ class OmegaParser3000:
             for i, a_word in enumerate(a_words, start=len(output_elements)):
                 output_elements.append(Element(word=a_word, location=i, href=a_href))
 
-        logger.info(f"Found {len(a_tags)} a tags")
-        logger.info(f"Found {len([e for e in output_elements if e.href])} hrefs")
-
         return output_elements
 
     @classmethod
@@ -191,7 +189,7 @@ class OmegaParser3000:
         words = text.split(" ")
         cls._cleanup_and_lower_words(words)
         cls._remove_numbers(words)
-        return words
+        return [word for word in words if word]
 
     @staticmethod
     def _clean_up_input_text(input_text: str) -> str:
