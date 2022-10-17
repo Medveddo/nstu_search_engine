@@ -1,7 +1,9 @@
+import asyncio
 import datetime
 import time
 from typing import List
 import bs4
+import aiohttp
 
 import requests
 from bs4 import BeautifulSoup
@@ -11,9 +13,9 @@ from sqlalchemy.exc import SQLAlchemyError
 import csv
 
 from database import DbActor
-from entites import Element, LinkToGo
+from entites import Element, LinkToGo, FetchedUrl
 from utils import Decorators
-
+import threading
 
 class Crawler:
     START_URL_LIST = [
@@ -37,6 +39,7 @@ class Crawler:
         self.crawl_count = 0
         self.start_time = datetime.datetime.utcnow()
         self.error_processed_urls: List[str] = []
+        self.pages_to_process: List[FetchedUrl] = []
 
     @staticmethod
     def create_stat_csv():
@@ -57,19 +60,84 @@ class Crawler:
     def start_crawl(self):
         self.create_stat_csv()
         try:
-            while self.urls_to_crawl:
-                self._crawl_iteration(self.urls_to_crawl.pop(0))
+            fetch_thread = threading.Thread(target=self.async_fetch_urls)
+            fetch_thread.start()
+            time.sleep(2)
+            idle_counter = 0
+            while True:
+                if not self.pages_to_process:
+                    logger.debug(f"Empty pages to process. Sleep ...")
+                    time.sleep(0.5)
+                    idle_counter += 1
+                    if idle_counter >= 30:
+                        break
+                try:
+                    page_to_process = self.pages_to_process.pop(0)
+                except IndexError:
+                    continue
+                self._crawl_iteration(page_to_process)
+
         except KeyboardInterrupt:
             logger.info("Crawler was stoped by user.")
         except Exception as e:
+            logger.exception(e)
             logger.critical(f"unexpected end of crawling - {e}")
-
         logger.success(
             f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
         )
         if self.error_processed_urls:
             logger.warning(f"Unprocessed urls: {self.error_processed_urls}")
         self.db.close()
+
+    def async_fetch_urls(self):
+        logger.debug("Starting fetch thread")
+        try:
+            asyncio.run(self.fetch_urls())
+        except (KeyboardInterrupt, RuntimeError):
+            logger.info("Finished fetch thread")
+    async def fetch_urls(self):
+        idle_counter = 0
+        batch_size = 10
+        while True:
+            if not self.urls_to_crawl:
+                logger.debug(f"Empty urls. Sleep ...")
+                time.sleep(5)
+                idle_counter += 1
+                if idle_counter >= 5:
+                    break
+            
+            urls_batch: List[LinkToGo] = self.urls_to_crawl[:batch_size]
+            self.urls_to_crawl = self.urls_to_crawl[batch_size:]
+
+            async def fetch(session: aiohttp.ClientSession, link: LinkToGo):
+                logger.debug(f"Fetching {link.link} ...")
+                retries_count = 0
+                while retries_count < 3:
+                    try:
+                        async with session.get(link.link) as response:
+                            text = await response.text()
+                            return FetchedUrl(url=link.link, text=text, depth=link.depth)
+                    except (aiohttp.ServerTimeoutError, aiohttp.ServerConnectionError, aiohttp.ClientConnectionError) as e:
+                        retries_count += 1
+                        logger.warning(f"{link.link} - {e} - {retries_count}")
+                    except Exception as e:
+                        logger.critical(e)
+                        break
+
+                self.error_processed_urls.append(link.link)
+                logger.error(f"Max retries exceed - {link.link}")
+                return FetchedUrl(url="", text="")
+
+            timeout = aiohttp.ClientTimeout(total=15, connect=1)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                results: List[FetchedUrl] = await asyncio.gather(*[fetch(session, url) for url in urls_batch], return_exceptions=True)
+                logger.success(f"Fetched {len(results)} urls")
+                results = [result for result in results if result.text]
+                self.pages_to_process.extend(results)
+            
+            logger.debug(f"End fetch iteration. urls_to_fetch={len(self.urls_to_crawl)} pages_to_process={len(self.pages_to_process)}")
+            time.sleep(5)            
+
 
     @Decorators.timing
     def _get_page(self, url: str) -> str:
@@ -89,24 +157,20 @@ class Crawler:
         return ""
 
     @Decorators.timing
-    def _crawl_iteration(self, link_to_process: LinkToGo):
-        current_depth = link_to_process.depth
-        url_to_process = link_to_process.link
+    def _crawl_iteration(self, fetched_url: FetchedUrl):
+        current_depth = fetched_url.depth
+        url_to_process = fetched_url.url
         if self.crawl_count and self.crawl_count % 10 == 0:
             self.db.get_stat(self.crawl_count)
         self.crawl_count += 1
         logger.debug(
-            f"{self.crawl_count} - Crawling {url_to_process} ({link_to_process.depth}) ..."
+            f"{self.crawl_count} - Processing {url_to_process} ({fetched_url.depth}) ..."
         )
 
-        # 2
-        # Получаем web-страницу
-        content = self._get_page(url_to_process)
-        if not content:
+        if not fetched_url.text:
             return
-        # 3
-        # Парсим страничку
-        elements = ParseUtils._get_childs_texts_turbo(content, link_to_process.link)
+
+        elements = ParseUtils._get_childs_texts_turbo(fetched_url.text, fetched_url.url)
 
         try:
             # 1
@@ -136,9 +200,9 @@ class Crawler:
         except SQLAlchemyError as e:
             # logger.exception(e)
             logger.warning(
-                f"Broken HTML with SQLLite {link_to_process.link} {link_to_process.depth}"
+                f"Broken HTML with SQLLite {fetched_url.url} {fetched_url.depth}"
             )
-            self.error_processed_urls.append(link_to_process.link)
+            self.error_processed_urls.append(fetched_url.url)
 
 
 class ParseUtils:
@@ -173,9 +237,11 @@ class OmegaParser3000:
                 continue
             if "mailto:" in a_href or "tel:" in a_href:
                 continue
+            if a_href.endswith((".jpg", ".png", ".gif", ".jpeg")):
+                continue
             if not a_href.startswith("http"):
                 # TODO: to remove the same site - uncomment
-                # continue
+                continue
                 a_href = f"{base_url}{a_href}"
             a_words = cls._text_to_clean_words(a.text)
             for i, a_word in enumerate(a_words, start=len(output_elements)):

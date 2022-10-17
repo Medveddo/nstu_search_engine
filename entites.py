@@ -17,3 +17,9 @@ class LinkToGo:
 
     def __hash__(self) -> int:
         return hash(self.link)
+
+@dataclass
+class FetchedUrl:
+    url: str
+    text: str
+    depth: int = 0

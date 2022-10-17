@@ -4,3 +4,4 @@ venv
 *.db
 *.sql
 *.csv
+*.db-journal
