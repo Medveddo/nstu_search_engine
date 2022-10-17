@@ -24,7 +24,7 @@ class Crawler:
         #     "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0"
         # ),
     ]
-    MAX_DEPTH = 0
+    MAX_DEPTH = 2
     SLEEP_TIMEOUT = 0.25
     MAX_RETRIES_COUNT = 3
 
@@ -61,6 +61,8 @@ class Crawler:
                 self._crawl_iteration(self.urls_to_crawl.pop(0))
         except KeyboardInterrupt:
             logger.info("Crawler was stoped by user.")
+        except Exception as e:
+            logger.critical(f"unexpected end of crawling - {e}")
 
         logger.success(
             f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
@@ -131,7 +133,8 @@ class Crawler:
             # https://stackoverflow.com/questions/480214/how-do-i-remove-duplicates-from-a-list-while-preserving-order
             self.urls_to_crawl.extend(links_to_go_next)
             self.urls_to_crawl = list(dict.fromkeys(self.urls_to_crawl))
-        except SQLAlchemyError:
+        except SQLAlchemyError as e:
+            # logger.exception(e)
             logger.warning(
                 f"Broken HTML with SQLLite {link_to_process.link} {link_to_process.depth}"
             )
@@ -140,68 +143,75 @@ class Crawler:
 
 class ParseUtils:
     @staticmethod
-    def get_text_only(text: str) -> str:
-        texts = ParseUtils._get_childs_texts(text)
-        return " ".join(texts)
-
-    @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
-        base_url = base_url.strip("/")
         soup = BeautifulSoup(text, "html.parser")
 
-        parsed_elements: List[Element] = []
+        # listUnwantedItems = ('script', 'style')
+        # for script in soup.find_all(listUnwantedItems):
+        #     script.decompose()
 
-        def _get_objects(element: bs4.element.Tag):
-            if element.name in ("head", "style", "script", "link"):
-                return
-            if element.name == "a":
-                logger.error(f"{element.get('href')} - {element.text}")
-            for element_ in element.contents:
-                if isinstance(element_, bs4.element.NavigableString):
-                    text = element_.text.strip().replace("\n", " ")
-                    words = " ".join(text.split()).split(" ")
-                    for word in words:
-                        # Исключить числа
-                        try:
-                            float(word.replace(",", "."))
-                            word = ""
-                        except ValueError:
-                            pass
+        return OmegaParser3000.merge_text_and_links(soup.text, soup.find_all("a"), base_url)
 
-                        href: str = element.get("href")
-                        if element.name == "a":
-                            if not href:
-                                continue
-                            if "mailto:" in href or "tel:" in href:
-                                continue
-                            if not href.startswith("http"):
-                                href = f"{base_url}{href}"
-                            logger.warning(href)
 
-                        if not href and not word:
-                            continue
+class OmegaParser3000:
+    STRIP_CHARACTERS = ":,«».\"/()-!?'"
 
-                        logger.success(word)
-                        parsed_elements.append(Element(word=word, href=href))
+    @classmethod
+    def merge_text_and_links(
+        cls, original_text: str, a_tags: List[bs4.Tag], base_url: str
+    ) -> List[Element]:
+        base_url = base_url.strip("/")
+        clean_words = cls._text_to_clean_words(original_text)
+        output_elements: List[Element] = []
+        for i, word in enumerate(clean_words):
+            output_elements.append(Element(word=word, location=i))
 
-                if isinstance(element_, bs4.element.Tag):
-                    _get_objects(element_)
-
-        _get_objects(soup.find("body"))
-
-        # Clean words and transworm to lower
-        for element in parsed_elements:
-            element.word = element.word.strip(':,«»."/()-!?').lower()
-
-        # Помечаем, местоположение на странице не пустых строк
-        location = 0
-        for element in parsed_elements:
-            if not element.word:
+        for a in a_tags:
+            a_href = a.get("href")
+            if not a_href:
                 continue
-            element.location = location
-            location += 1
+            if "mailto:" in a_href or "tel:" in a_href:
+                continue
+            if not a_href.startswith("http"):
+                # TODO: to remove the same site - uncomment
+                # continue
+                a_href = f"{base_url}{a_href}"
+            a_words = cls._text_to_clean_words(a.text)
+            for i, a_word in enumerate(a_words, start=len(output_elements)):
+                output_elements.append(Element(word=a_word, location=i, href=a_href))
 
-        links = [el.href for el in parsed_elements if el.href]
-        logger.debug(f"real={len(links)}, unique={len(set(links))}")
+        logger.info(f"Found {len(a_tags)} a tags")
+        logger.info(f"Found {len([e for e in output_elements if e.href])} hrefs")
 
-        return parsed_elements
+        return output_elements
+
+    @classmethod
+    def _text_to_clean_words(cls, text: str) -> List[str]:
+        text = cls._clean_up_input_text(text)
+        words = text.split(" ")
+        cls._cleanup_and_lower_words(words)
+        cls._remove_numbers(words)
+        return words
+
+    @staticmethod
+    def _clean_up_input_text(input_text: str) -> str:
+        clean_text = input_text.replace("\n", " ")
+        clean_text = " ".join(clean_text.split())
+        return clean_text
+
+    @classmethod
+    def _cleanup_and_lower_words(cls, words: List[str]) -> None:
+        for i, word in enumerate(words):
+            words[i] = word.strip(cls.STRIP_CHARACTERS).lower()
+
+    @staticmethod
+    def _remove_numbers(words: List[str]) -> None:
+        new_words = []
+        for word in words:
+            try:
+                float(word.replace(",", "."))
+            except ValueError:
+                new_words.append(word)
+
+        words.clear()
+        words.extend(new_words)
