@@ -20,6 +20,8 @@ import threading
 class Crawler:
     START_URL_LIST = [
         LinkToGo("https://ngs.ru/"),
+        LinkToGo("https://lenta.ru/"),
+        LinkToGo("https://news.mail.ru/"),
         # LinkToGo("http://deb.debian.org/"),
         # LinkToGo("http://example.com/"),
         # LinkToGo(
@@ -40,6 +42,7 @@ class Crawler:
         self.start_time = datetime.datetime.utcnow()
         self.error_processed_urls: List[str] = []
         self.pages_to_process: List[FetchedUrl] = []
+        self.stop_flag = False
 
     @staticmethod
     def create_stat_csv():
@@ -67,27 +70,33 @@ class Crawler:
             while True:
                 if not self.pages_to_process:
                     logger.debug(f"Empty pages to process. Sleep ...")
-                    time.sleep(0.5)
+                    time.sleep(5)
                     idle_counter += 1
-                    if idle_counter >= 30:
+                    if idle_counter >= 8:
                         break
+                    continue
                 try:
                     page_to_process = self.pages_to_process.pop(0)
+                    idle_counter = 0
                 except IndexError:
                     continue
                 self._crawl_iteration(page_to_process)
 
+            logger.debug("Wait fetch thread to end ...")
+            fetch_thread.join()
         except KeyboardInterrupt:
             logger.info("Crawler was stoped by user.")
+            self.stop_flag = True
         except Exception as e:
             logger.exception(e)
             logger.critical(f"unexpected end of crawling - {e}")
-        logger.success(
-            f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
-        )
-        if self.error_processed_urls:
-            logger.warning(f"Unprocessed urls: {self.error_processed_urls}")
-        self.db.close()
+        finally:
+            logger.success(
+                f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
+            )
+            if self.error_processed_urls:
+                logger.warning(f"Unprocessed urls: {self.error_processed_urls}")
+            self.db.close()
 
     def async_fetch_urls(self):
         logger.debug("Starting fetch thread")
@@ -95,40 +104,50 @@ class Crawler:
             asyncio.run(self.fetch_urls())
         except (KeyboardInterrupt, RuntimeError):
             logger.info("Finished fetch thread")
+        
     async def fetch_urls(self):
         idle_counter = 0
         batch_size = 10
         while True:
+            if self.stop_flag:
+                self.error_processed_urls.extend(self.urls_to_crawl)
+                break
+
             if not self.urls_to_crawl:
-                logger.debug(f"Empty urls. Sleep ...")
-                time.sleep(5)
+                logger.debug(f"Empty urls to fetch ({idle_counter}). Sleeping ...")
+                await asyncio.sleep(5)
                 idle_counter += 1
                 if idle_counter >= 5:
                     break
+                continue
             
             urls_batch: List[LinkToGo] = self.urls_to_crawl[:batch_size]
             self.urls_to_crawl = self.urls_to_crawl[batch_size:]
 
             async def fetch(session: aiohttp.ClientSession, link: LinkToGo):
-                logger.debug(f"Fetching {link.link} ...")
                 retries_count = 0
                 while retries_count < 3:
                     try:
                         async with session.get(link.link) as response:
                             text = await response.text()
+                            logger.debug(f"fetched {link.link}")
                             return FetchedUrl(url=link.link, text=text, depth=link.depth)
-                    except (aiohttp.ServerTimeoutError, aiohttp.ServerConnectionError, aiohttp.ClientConnectionError) as e:
+                    except (aiohttp.ServerTimeoutError, aiohttp.ServerConnectionError, aiohttp.ClientConnectionError, asyncio.exceptions.TimeoutError) as e:
                         retries_count += 1
-                        logger.warning(f"{link.link} - {e} - {retries_count}")
+                        logger.warning(f"{link.link} - {repr(e)} - {retries_count}")
+                        await asyncio.sleep(0.25)
+                    except (aiohttp.TooManyRedirects, UnicodeDecodeError):
+                        break
                     except Exception as e:
                         logger.critical(e)
+                        logger.exception(e)
                         break
 
                 self.error_processed_urls.append(link.link)
                 logger.error(f"Max retries exceed - {link.link}")
                 return FetchedUrl(url="", text="")
 
-            timeout = aiohttp.ClientTimeout(total=15, connect=1)
+            timeout = aiohttp.ClientTimeout(total=10, connect=2)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 results: List[FetchedUrl] = await asyncio.gather(*[fetch(session, url) for url in urls_batch], return_exceptions=True)
                 logger.success(f"Fetched {len(results)} urls")
@@ -136,8 +155,10 @@ class Crawler:
                 self.pages_to_process.extend(results)
             
             logger.debug(f"End fetch iteration. urls_to_fetch={len(self.urls_to_crawl)} pages_to_process={len(self.pages_to_process)}")
-            time.sleep(5)            
+            idle_counter = 0
+            await asyncio.sleep(5)          
 
+        logger.info("Finishing fetch thread ...")
 
     @Decorators.timing
     def _get_page(self, url: str) -> str:
