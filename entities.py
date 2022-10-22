@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 
 
 @dataclass
@@ -23,3 +24,8 @@ class FetchedUrl:
     url: str
     text: str
     depth: int = 0
+
+@dataclass
+class WordLocationsCombination:
+    url: str
+    word_locations: List[int]
