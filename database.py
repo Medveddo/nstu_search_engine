@@ -389,24 +389,27 @@ class DbActor:
         self.db.execute(self.SYNC_TEMP_AND_MAIN_PAGE_RANKS)
         self.db.commit()
         
-    def get_words_location_combinations(self, elements: List[str]):
-        if len(elements) == 0:
+    # get combinations of all word locations from list on all avaliable urls
+    # returns WordLocationsCombination or null if words not specified
+    def get_words_location_combinations(self, words: List[str]):
+        if len(words) == 0:
             return
 
-        query = f"select {elements[0]}_url as url"
-        for i, elem in enumerate(elements):
-            query += f", {elem}"
-        for i, elem in enumerate(elements):
+        query = f"select {words[0]}_url as url"
+        for i, word in enumerate(words):
+            query += f", {word}"
+        for i, word in enumerate(words):
             if i == 0:
                 query += " from"
             else:
-                query += "inner join"
+                query += " inner join"
             query += (
-                f"(select {elem}, fkurlid as {elem}_url, location as {elem}_location from word_location "
-                f"inner join (select wordid as {elem} from word_list where word = '{elem}') as word{i} on word{i}.{elem} = fkwordid) "
+                f"(select {word}, fkurlid as {word}_url, location as {word}_location from word_location "
+                f"inner join (select wordid as {word} from word_list where word = '{word}') as word{i} on word{i}.{word} = fkwordid) "
             )
             if (i > 0):
-                 query += f"on {elements[i-1]}_url = {elements[i]}_url"
+                 query += f"on {words[i-1]}_url = {words[i]}_url"
+
         result = self.db.execute(query).fetchall()
         self.db.commit()
 
