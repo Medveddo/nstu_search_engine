@@ -167,6 +167,10 @@ class DbActor:
     SELECT fkFromUrlId FROM link_between_url WHERE fkToUrlId = {link_to_fk}
     """
 
+    GET_URL_LINK_COUNT = """
+    SELECT COUNT(*) FROM link_between_url WHERE fkFromUrlId = {fk_from_url_id}
+    """
+
     def __init__(self, in_memory: bool = True) -> None:
         if in_memory:
             self.db = DbSession()
@@ -348,6 +352,12 @@ class DbActor:
         result = result.fetchall()
         return list(itertools.chain(*result))
 
+    def get_url_links_count(self, fk_from_url_id: int) -> int:
+        result = self.db.execute(
+            self.GET_URL_LINK_COUNT.format(fk_from_url_id=fk_from_url_id)
+        ).fetchone()[0]
+        return result
+        
     def get_words_location_combinations(self, elements: List[str]):
         if len(elements) == 0:
             return

@@ -44,6 +44,7 @@ class PageRankerer:
         # for each url_fk go to urls-between and find where URL_TO == url_fk
         for url_id in url_ids[1:]:
             from_url_fks = self.db.get_references_by_url_to_fk(url_id)
+
             logger.debug(f"{url_id} - {from_url_fks}")
             break
 
