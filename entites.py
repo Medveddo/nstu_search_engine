@@ -9,7 +9,7 @@ class Element:
     href: str = ""
     link_id: int = 0
 
-
+    
 @dataclass
 class LinkToGo:
     link: str

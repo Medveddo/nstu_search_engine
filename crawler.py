@@ -32,7 +32,9 @@ class Crawler:
     SLEEP_TIMEOUT = 0.25
     MAX_RETRIES_COUNT = 3
 
-    def __init__(self, url_list=START_URL_LIST, depth=MAX_DEPTH) -> None:
+    def __init__(self, url_list: List[LinkToGo]=START_URL_LIST, depth=MAX_DEPTH) -> None:
+        for url in url_list:
+            url.link = url.link.strip("/")
         self.start_url_list = url_list[:]
         self.urls_to_crawl: List[LinkToGo] = url_list[:]
         self.crawled_urls: List[str] = []
@@ -56,6 +58,7 @@ class Crawler:
                     "url_list",
                     "word_list",
                     "word_location",
+                    "unique_words_count",
                 ]
             )
 
@@ -69,7 +72,7 @@ class Crawler:
             idle_counter = 0
             while True:
                 if not self.pages_to_process:
-                    logger.debug(f"Empty pages to process. Sleep ...")
+                    logger.debug(f"Empty pages to process - ({idle_counter}) Sleep ...")
                     time.sleep(5)
                     idle_counter += 1
                     if idle_counter >= 8:
@@ -81,9 +84,6 @@ class Crawler:
                 except IndexError:
                     continue
                 self._crawl_iteration(page_to_process)
-
-            logger.debug("Wait fetch thread to end ...")
-            fetch_thread.join()
         except KeyboardInterrupt:
             logger.info("Crawler was stoped by user.")
             self.stop_flag = True
@@ -91,11 +91,14 @@ class Crawler:
             logger.exception(e)
             logger.critical(f"unexpected end of crawling - {e}")
         finally:
+            logger.debug("Wait fetch thread to end ...")
+            fetch_thread.join()
             logger.success(
                 f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
             )
             if self.error_processed_urls:
-                logger.warning(f"Unprocessed urls: {self.error_processed_urls}")
+                logger.warning(f"Unprocessed urls ({len(self.error_processed_urls)}): {self.error_processed_urls[:3]} ... {self.error_processed_urls[-3:]}")
+            self.db.save_to_db_to_disk()
             self.db.close()
 
     def async_fetch_urls(self):
@@ -107,7 +110,7 @@ class Crawler:
         
     async def fetch_urls(self):
         idle_counter = 0
-        batch_size = 10
+        batch_size = 30
         while True:
             if self.stop_flag:
                 self.error_processed_urls.extend(self.urls_to_crawl)
@@ -221,7 +224,7 @@ class Crawler:
         except SQLAlchemyError as e:
             # logger.exception(e)
             logger.warning(
-                f"Broken HTML with SQLLite {fetched_url.url} {fetched_url.depth}"
+                f"Broken HTML with SQLLite {fetched_url.url} {fetched_url.depth} - {e}"
             )
             self.error_processed_urls.append(fetched_url.url)
 
@@ -260,13 +263,14 @@ class OmegaParser3000:
                 continue
             if a_href.endswith((".jpg", ".png", ".gif", ".jpeg")):
                 continue
+            
             if not a_href.startswith("http"):
                 # TODO: to remove the same site - uncomment
                 continue
                 a_href = f"{base_url}{a_href}"
             a_words = cls._text_to_clean_words(a.text)
             for i, a_word in enumerate(a_words, start=len(output_elements)):
-                output_elements.append(Element(word=a_word, location=i, href=a_href))
+                output_elements.append(Element(word=a_word, location=i, href=a_href.strip("/")))
 
         return output_elements
 
