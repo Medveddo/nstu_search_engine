@@ -8,10 +8,7 @@
 
 # Rank temp
 
-from pydoc import doc
-from turtle import distance
 from typing import List
-
 from loguru import logger
 from database import DbActor
 from entities import WordLocationsCombination
@@ -94,7 +91,7 @@ class PageRankerer:
         
         return self.normalized_score(min_distance_list)
 
-    def normalized_score(self, distance_list, is_small_better = 0):
+    def normalized_score(self, distance_list, is_small_better = True):
         columns = list(zip(*distance_list))
 
         min_score = min(columns[1])

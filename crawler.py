@@ -4,6 +4,7 @@ import time
 from typing import List
 import bs4
 import aiohttp
+import re
 
 import requests
 from bs4 import BeautifulSoup
@@ -233,12 +234,7 @@ class ParseUtils:
     @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
         soup = BeautifulSoup(text, "html.parser")
-
-        # listUnwantedItems = ('script', 'style')
-        # for script in soup.find_all(listUnwantedItems):
-        #     script.decompose()
-
-        return OmegaParser3000.merge_text_and_links(soup.text, soup.find_all("a"), base_url)
+        return OmegaParser3000.merge_text_and_links(soup.get_text(separator=" ", strip=True), soup.find_all("a"), base_url)
 
 
 class OmegaParser3000:
@@ -258,7 +254,7 @@ class OmegaParser3000:
             a_href = a.get("href")
             if not a_href:
                 continue
-            if "mailto:" in a_href or "tel:" in a_href or "#" in a_href:
+            if "mailto:" in a_href or "tel:" in a_href:
                 continue
             if a_href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")):
                 continue
@@ -276,7 +272,7 @@ class OmegaParser3000:
     @classmethod
     def _text_to_clean_words(cls, text: str) -> List[str]:
         text = cls._clean_up_input_text(text)
-        words = text.split(" ")
+        words = re.split("[\W\d]+", text, flags=re.UNICODE)
         cls._cleanup_and_lower_words(words)
         cls._remove_numbers(words)
         return [word for word in words if word]

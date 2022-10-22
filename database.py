@@ -167,6 +167,10 @@ class DbActor:
     SELECT fkFromUrlId FROM link_between_url WHERE fkToUrlId = {link_to_fk}
     """
 
+    SELECT_ALL_WORDS_BY_URL = """
+    SELECT word FROM word_list INNER JOIN word_location ON wordId = fkWordId where fkUrlId = {url_id}
+    """
+
     GET_URL_LINK_COUNT = """
     SELECT COUNT(*) FROM link_between_url WHERE fkFromUrlId = {fk_from_url_id}
     """
@@ -388,6 +392,10 @@ class DbActor:
     def sync_main_and_temp_rank_tables(self) -> None:
         self.db.execute(self.SYNC_TEMP_AND_MAIN_PAGE_RANKS)
         self.db.commit()
+
+    def get_words_by_url(self, url_id):
+        result = self.db.execute(self.SELECT_ALL_WORDS_BY_URL.format(url_id=url_id)).fetchall()
+        return list(zip(*result))[0]
         
     # get combinations of all word locations from list on all avaliable urls
     # returns WordLocationsCombination or null if words not specified
