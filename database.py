@@ -171,6 +171,23 @@ class DbActor:
     SELECT COUNT(*) FROM link_between_url WHERE fkFromUrlId = {fk_from_url_id}
     """
 
+    GET_PAGE_RANK_BY_ID = """
+    SELECT rank FROM page_rank_main WHERE id = {id_}
+    """
+
+    SET_PAGE_RANK_BY_ID = """
+    INSERT INTO page_rank_temp(fkUrlId, rank) VALUES ({url_id}, {rank})
+    """
+
+    SYNC_TEMP_AND_MAIN_PAGE_RANKS = """
+    UPDATE page_rank_main
+    SET 
+        rank = (SELECT page_rank_temp.rank
+                                FROM page_rank_temp
+                                WHERE page_rank_temp.fkUrlId = page_rank_main.fkUrlId)
+
+    """
+
     def __init__(self, in_memory: bool = True) -> None:
         if in_memory:
             self.db = DbSession()
@@ -357,6 +374,20 @@ class DbActor:
             self.GET_URL_LINK_COUNT.format(fk_from_url_id=fk_from_url_id)
         ).fetchone()[0]
         return result
+
+    def get_page_rank_by_id(self, id_: int) -> float:
+        result = self.db.execute(self.GET_PAGE_RANK_BY_ID.format(id_=id_)).fetchone()[0]
+        return result
+
+    def set_page_rank_by_id(self, id_: int, rank: float) -> None:
+        self.db.execute(
+            self.SET_PAGE_RANK_BY_ID.format(url_id=id_, rank=rank),
+        )
+        self.db.commit()
+    
+    def sync_main_and_temp_rank_tables(self) -> None:
+        self.db.execute(self.SYNC_TEMP_AND_MAIN_PAGE_RANKS)
+        self.db.commit()
         
     def get_words_location_combinations(self, elements: List[str]):
         if len(elements) == 0:

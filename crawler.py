@@ -110,7 +110,7 @@ class Crawler:
         
     async def fetch_urls(self):
         idle_counter = 0
-        batch_size = 30
+        batch_size = 60
         while True:
             if self.stop_flag:
                 self.error_processed_urls.extend(self.urls_to_crawl)

@@ -1,7 +1,7 @@
 from functools import wraps
 import time
 
-TIMING = False
+TIMING = True
 
 
 class Decorators:

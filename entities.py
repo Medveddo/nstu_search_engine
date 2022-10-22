@@ -29,3 +29,11 @@ class FetchedUrl:
 class WordLocationsCombination:
     url: str
     word_locations: List[int]
+
+
+@dataclass
+class PageRankURL:
+    url: str
+    id_: int
+    links_count: int
+    rank: float
