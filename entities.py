@@ -34,7 +34,6 @@ class WordLocationsCombination:
 
 @dataclass
 class PageRankURL:
-    url: str
-    id_: int
+    id: int
     links_count: int
     rank: float

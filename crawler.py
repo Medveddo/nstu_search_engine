@@ -219,11 +219,9 @@ class Crawler:
                 if element.href and element.href not in self.crawled_urls
             ]
 
-            # https://stackoverflow.com/questions/480214/how-do-i-remove-duplicates-from-a-list-while-preserving-order
             self.urls_to_crawl.extend(links_to_go_next)
             self.urls_to_crawl = list(dict.fromkeys(self.urls_to_crawl))
         except SQLAlchemyError as e:
-            # logger.exception(e)
             logger.warning(
                 f"Broken HTML with SQLLite {fetched_url.url} {fetched_url.depth} - {e}"
             )
@@ -234,68 +232,31 @@ class ParseUtils:
     @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
         soup = BeautifulSoup(text, "html.parser")
-        return OmegaParser3000.merge_text_and_links(soup.get_text(separator=" ", strip=True), soup.find_all("a"), base_url)
-
+        return OmegaParser3000.merge_text_and_links(soup.get_text(separator=" ", strip=True), soup.find_all('a', href=True), base_url)
 
 class OmegaParser3000:
-    STRIP_CHARACTERS = ":,«».\"/|()-!?'0123456789"
-
     @classmethod
-    def merge_text_and_links(
-        cls, original_text: str, a_tags: List[bs4.Tag], base_url: str
-    ) -> List[Element]:
+    def merge_text_and_links(cls, original_text: str, a_tags: List[bs4.Tag], base_url: str) -> List[Element]:
         base_url = base_url.strip("/")
-        clean_words = cls._text_to_clean_words(original_text)
+        words = cls.text_to_wordlist(original_text)
         output_elements: List[Element] = []
-        for i, word in enumerate(clean_words):
+        for i, word in enumerate(words):
             output_elements.append(Element(word=word, location=i))
 
         for a in a_tags:
             a_href = a.get("href")
-            if not a_href:
+            if "mailto:" in a_href or "tel:" in a_href or a_href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")) or not a_href.startswith("http"):
                 continue
-            if "mailto:" in a_href or "tel:" in a_href:
-                continue
-            if a_href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")):
-                continue
-            
-            if not a_href.startswith("http"):
-                # TODO: to remove the same site - uncomment
-                continue
-                a_href = f"{base_url}{a_href}"
-            a_words = cls._text_to_clean_words(a.text)
+
+            a_words = cls.text_to_wordlist(a.get_text(separator=" ", strip=True))
             for i, a_word in enumerate(a_words, start=len(output_elements)):
                 output_elements.append(Element(word=a_word, location=i, href=a_href.strip("/")))
 
         return output_elements
 
     @classmethod
-    def _text_to_clean_words(cls, text: str) -> List[str]:
-        text = cls._clean_up_input_text(text)
+    def text_to_wordlist(cls, text: str) -> List[str]:
         words = re.split("[\W\d]+", text, flags=re.UNICODE)
-        cls._cleanup_and_lower_words(words)
-        cls._remove_numbers(words)
-        return [word for word in words if word]
-
-    @staticmethod
-    def _clean_up_input_text(input_text: str) -> str:
-        clean_text = input_text.replace("\n", " ")
-        clean_text = " ".join(clean_text.split())
-        return clean_text
-
-    @classmethod
-    def _cleanup_and_lower_words(cls, words: List[str]) -> None:
         for i, word in enumerate(words):
-            words[i] = word.strip(cls.STRIP_CHARACTERS).lower()
-
-    @staticmethod
-    def _remove_numbers(words: List[str]) -> None:
-        new_words = []
-        for word in words:
-            try:
-                float(word.replace(",", "."))
-            except ValueError:
-                new_words.append(word)
-
-        words.clear()
-        words.extend(new_words)
+            words[i] = word.lower()
+        return words
