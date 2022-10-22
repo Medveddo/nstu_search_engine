@@ -25,9 +25,10 @@ class FetchedUrl:
     text: str
     depth: int = 0
 
+
 @dataclass
 class WordLocationsCombination:
-    url: str
+    url: int
     word_locations: List[int]
 
 

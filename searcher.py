@@ -8,14 +8,14 @@
 
 # Rank temp
 
-from dataclasses import dataclass
 from typing import List
 
 from loguru import logger
 from database import DbActor
+from entities import WordLocationsCombination
 from entities import PageRankURL
 from utils import Decorators
-
+from dataclasses import dataclass
 
 class Searcher:
     def __init__(self) -> None:
@@ -33,6 +33,37 @@ class PageRankerer:
 
     def close(self) -> None:
         self.db.close()
+
+    def distance_score(self, words):
+        combinations: List[WordLocationsCombination] = self.db.get_words_location_combinations(words)
+        if len(combinations) == 0:
+            return []
+
+        unique_ids = set() 
+        new_list = []
+        for i in combinations:
+            if i.url not in unique_ids:
+                new_list.append([i.url, 999999.9])
+                unique_ids.add(i.url)
+        
+        if len(combinations[0].word_locations) == 1:
+            for i in new_list:
+                new_list[i][1] = 1.0
+
+        for i in new_list:
+            k_number = 0
+            for j in combinations:
+                if (j.url == i[0]):
+                    k_number += 1
+                    local_distance = 0
+                    for k in range(len(j.word_locations) - 1):
+                        diff = abs(j.word_locations[k] - j.word_locations[k - 1])
+                        local_distance += diff
+                if (i[1] > local_distance):
+                    i[1] = local_distance
+        
+        return new_list
+
 
     @Decorators.timing
     def calculate_ranks(self):
