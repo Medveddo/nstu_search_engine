@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import csv
 
 from database import DbActor
-from entites import Element, LinkToGo, FetchedUrl
+from entities import Element, LinkToGo, FetchedUrl
 from utils import Decorators
 import threading
 

@@ -2,11 +2,12 @@ import csv
 
 import itertools
 from typing import List, Tuple
+from xml.etree.ElementTree import ElementTree
 from loguru import logger
 from sqlalchemy import create_engine
 import sqlalchemy
 from sqlalchemy.orm import Session, sessionmaker
-from entites import Element
+from entities import Element, WordLocationsCombination
 from utils import Decorators
 
 from tabulate import tabulate
@@ -346,3 +347,32 @@ class DbActor:
         result = self.db.execute(self.SELECT_ALL_REFERENCES_TO_URL_BY_ID.format(link_to_fk=fk_to_url_id))
         result = result.fetchall()
         return list(itertools.chain(*result))
+    def select_words_location_combinations(self, elements: List[str]):
+        if len(elements) == 0:
+            return
+
+        query = f"select {elements[0]}_url as url"
+        for i, elem in enumerate(elements):
+            query += f", {elem}"
+        for i, elem in enumerate(elements):
+            if i == 0:
+                query += " from"
+            else:
+                query += "inner join"
+            query += (
+                f"(select {elem}, fkurlid as {elem}_url, location as {elem}_location from word_location "
+                f"inner join (select wordid as {elem} from word_list where word = '{elem}') as word{i} on word{i}.{elem} = fkwordid) "
+            )
+            if (i > 0):
+                 query += f"on {elements[i-1]}_url = {elements[i]}_url"
+        result = self.db.execute(query).fetchall()
+        self.db.commit()
+
+        combinations_list = []
+        for i in result:
+            locations_list = []
+            for j in range(len(i) - 1):
+                locations_list.append(i[j + 1])
+            combinations_list.append(WordLocationsCombination(i[0], locations_list))
+        
+        return combinations_list
