@@ -242,8 +242,7 @@ class ParseUtils:
 
 
 class OmegaParser3000:
-    # STRIP_CHARACTERS = ":,«».\"/()-!?'"
-    STRIP_CHARACTERS = ":,«».\"/()-!?'0123456789"
+    STRIP_CHARACTERS = ":,«».\"/|()-!?'0123456789"
 
     @classmethod
     def merge_text_and_links(
@@ -259,9 +258,9 @@ class OmegaParser3000:
             a_href = a.get("href")
             if not a_href:
                 continue
-            if "mailto:" in a_href or "tel:" in a_href:
+            if "mailto:" in a_href or "tel:" in a_href or "#" in a_href:
                 continue
-            if a_href.endswith((".jpg", ".png", ".gif", ".jpeg")):
+            if a_href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")):
                 continue
             
             if not a_href.startswith("http"):
