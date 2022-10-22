@@ -347,7 +347,8 @@ class DbActor:
         result = self.db.execute(self.SELECT_ALL_REFERENCES_TO_URL_BY_ID.format(link_to_fk=fk_to_url_id))
         result = result.fetchall()
         return list(itertools.chain(*result))
-    def select_words_location_combinations(self, elements: List[str]):
+
+    def get_words_location_combinations(self, elements: List[str]):
         if len(elements) == 0:
             return
 
