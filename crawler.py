@@ -158,7 +158,7 @@ class Crawler:
                 results = [result for result in results if result.text]
                 self.pages_to_process.extend(results)
             
-            logger.debug(f"End fetch iteration. urls_to_fetch={len(self.urls_to_crawl)} pages_to_process={len(self.pages_to_process)}")
+            logger.info(f"End fetch iteration. urls_to_fetch={len(self.urls_to_crawl)} pages_to_process={len(self.pages_to_process)}")
             idle_counter = 0
             await asyncio.sleep(5)          
 

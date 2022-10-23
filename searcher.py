@@ -8,7 +8,7 @@
 
 # Rank temp
 
-from typing import List
+from typing import Dict, List
 from loguru import logger
 from database import DbActor
 from entities import WordLocationsCombination
@@ -57,7 +57,7 @@ class Searcher:
 
 class PageRankerer:
     def __init__(self) -> None:
-        self.db = DbActor(in_memory=False)
+        self.db = DbActor()
 
     def close(self) -> None:
         self.db.close()
@@ -110,36 +110,37 @@ class PageRankerer:
     @Decorators.timing
     def calculate_ranks(self):
         url_ids = self.db.get_unique_urls_ids()
-        self.insert_fresh_page_rank(url_ids)
 
-        entites_list = []
-        for i, url_id in enumerate(url_ids):
-            logger.debug(f"{i} starting...")
-            url_info = self.db.get_url_page_rank_info(url_id)
-            if len(url_info) == 0:
-                continue
+        page_ranks: Dict[int, PageRankURL] = dict()
 
-            url_entity = PageRankURL(url_info[0][0], url_info[0][1], url_info[0][2])
-            entites_list.append(url_entity)
-            other_links_sum = 0
-            
-            for ref_url in url_info:             
-                try:
-                    other_links_sum += ref_url[4]
-                except TypeError:
-                    logger.error(f"NO RANK URL ID: {ref_url[3]}")
-                
-            default_coef = 0.85
-            new_rank = (1 - default_coef) + default_coef * other_links_sum
-            url_entity.rank = new_rank
+        for url_id in url_ids:
+            links_count = self.db.get_from_url_count(url_id)
+            references = self.db.get_from_urls_by_to(url_id)
+            page_ranks.setdefault(
+                url_id,
+                PageRankURL(
+                    id=url_id,
+                    links_count=links_count,
+                    rank=1.0,
+                    ratio=1.0/links_count if links_count else 1.0,
+                    references=references
+                )
+            )
         
-        self.db.fill_temp_page_rank(entites_list)
-        self.db.sync_main_and_temp_rank_tables()
+        iterations_count = 25
 
-        self.db.db.execute("DELETE FROM page_rank_temp")
-        self.db.db.commit()
+        for i in range(iterations_count):
+            logger.debug(f"Iteration #{i}")
+            for page in page_ranks.values():
+                other_links_sum = 0
+                for ref in page.references:
+                    other_links_sum += page_ranks.get(ref).ratio
+                page.rank = (1 - 0.85) + 0.85 * other_links_sum
 
+            for page in page_ranks.values():
+                page.ratio = page.rank / page.links_count if page.links_count else page.rank
 
-    def insert_fresh_page_rank(self, url_fks: List[str]) -> None:
-        self.db.fill_page_rank(url_fks)
-        
+            pages = list(page_ranks.values())
+            logger.debug(pages[30])
+
+        self.db.fill_page_rank(list(page_ranks.values()))

@@ -210,13 +210,25 @@ class DbActor:
 
     """
 
+    GET_PAGE_RANK_ONE_ROW = """
+    SELECT * FROM page_rank_main LIMIT 1
+    """
+
     def __init__(self, in_memory: bool = True) -> None:
         if in_memory:
+            # self.import_db_to_memory_from_disk()
             self.db = DbSession()
         else:
             eng = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
             self.db = sessionmaker(autoflush=False, bind=eng)()
         self.url_ids_dict = dict()
+    
+    def import_db_to_memory_from_disk(self) -> None:
+        engine_file = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
+        raw_connection_file = engine_file.raw_connection()
+        raw_connection_file.backup(raw_connection_memory.connection)
+        raw_connection_file.close()
+        engine_file.dispose()
 
     def save_to_db_to_disk(self) -> None:
         engine_file = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
@@ -372,20 +384,20 @@ class DbActor:
         self.db.execute(query)
         self.db.commit()
 
-    def get_unique_urls_ids(self):
+    def get_unique_urls_ids(self) -> List[int]:
         result = self.db.execute(self.SELECT_UNIQUE_URL_IDS)
         results = result.fetchall()
         result = list(zip(*results))
         return result[0]
 
-    def fill_page_rank(self, url_fks: List[int]) -> None:
+    def fill_page_rank(self, page_ranks: List[PageRankURL]) -> None:
         self.db.execute("delete from page_rank_main")
         self.db.execute("delete from page_rank_temp")
         self.db.commit()
 
         list_of_values = ""
-        for url_id in url_fks:
-            list_of_values += f"({url_id}, 1.0),"
+        for page in page_ranks:
+            list_of_values += f"({page.id}, {page.rank}),"
         list_of_values = list_of_values.strip(",")
         self.db.execute(self.INSERT_IN_RANGE_RANK_MAIN.format(list_of_values=list_of_values))
         self.db.commit()
@@ -455,3 +467,10 @@ class DbActor:
     def get_url_page_rank_info(self, url_id):
         result = self.db.execute(self.SELECT_URL_RANK_INFO.format(url_id=url_id)).fetchall()
         return result
+
+    def is_page_rank_table_empty(self) -> bool:
+        result = self.db.execute(self.GET_PAGE_RANK_ONE_ROW)
+        result = result.fetchone()
+        if result is None:
+            return True
+        return False

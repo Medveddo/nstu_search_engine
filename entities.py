@@ -37,3 +37,5 @@ class PageRankURL:
     id: int
     links_count: int
     rank: float
+    ratio: float
+    references: List[int]
