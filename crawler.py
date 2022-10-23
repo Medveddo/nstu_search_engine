@@ -111,7 +111,7 @@ class Crawler:
         
     async def fetch_urls(self):
         idle_counter = 0
-        batch_size = 60
+        batch_size = 30
         while True:
             if self.stop_flag:
                 self.error_processed_urls.extend(self.urls_to_crawl)
@@ -231,39 +231,41 @@ class Crawler:
 class ParseUtils:
     @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
-        #TODO serial location of <a>words and other tag's words
         soup = BeautifulSoup(text, "html.parser")
+        for data in soup(['style', 'script', 'meta', 'template']):
+            data.decompose()
 
-        a_tags = soup.find_all('a', href=True)
-        for i in a_tags:
-            i.extract()
-
-        text_without_a_tag = soup.get_text(separator=" ", strip=True)
-        return OmegaParser3000.merge_text_and_links(text_without_a_tag, a_tags, base_url)
+        return OmegaParser3000.merge_text_and_links(soup.find_all(), base_url)
 
 class OmegaParser3000:
     @classmethod
-    def merge_text_and_links(cls, original_text: str, a_tags: List[bs4.Tag], base_url: str) -> List[Element]:
+    def merge_text_and_links(cls, tags: List[bs4.Tag], base_url: str) -> List[Element]:
         base_url = base_url.strip("/")
-        words = cls.text_to_wordlist(original_text)
         output_elements: List[Element] = []
-        for i, word in enumerate(words):
-            output_elements.append(Element(word=word, location=i))
+        
+        for i in tags:
+            tag_text = i.find(text=True, recursive=False)
+            if not (tag_text is None):
+                words = cls.text_to_wordlist(tag_text)
+                if "u" in words:
+                    print(tag_text)
 
-        for a in a_tags:
-            a_href = a.get("href")
-            if "mailto:" in a_href or "tel:" in a_href or a_href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")) or not a_href.startswith("http"):
-                continue
-
-            a_words = cls.text_to_wordlist(a.get_text(separator=" ", strip=True))
-            for i, a_word in enumerate(a_words, start=len(output_elements)):
-                output_elements.append(Element(word=a_word, location=i, href=a_href.strip("/")))
+                href = ""
+                if (i.name == 'a'):
+                    href = i.get("href")
+                    if not (href is None):
+                        if "mailto:" in href or "tel:" in href or href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")) or not href.startswith("http"):
+                            href = ""
+                        href = href.strip("/")        
+                
+                for j, word in enumerate(words, start=len(output_elements)):
+                    output_elements.append(Element(word=word, location=j, href=href))
 
         return output_elements
 
     @classmethod
     def text_to_wordlist(cls, text: str) -> List[str]:
-        words = re.split("[\W\d]+", text, flags=re.UNICODE)
+        words = list(filter(None, re.split("[\W\d]+", text, flags=re.UNICODE)))
         for i, word in enumerate(words):
             words[i] = word.lower()
         return words
