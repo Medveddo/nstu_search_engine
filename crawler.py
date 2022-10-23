@@ -231,8 +231,15 @@ class Crawler:
 class ParseUtils:
     @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
+        #TODO serial location of <a>words and other tag's words
         soup = BeautifulSoup(text, "html.parser")
-        return OmegaParser3000.merge_text_and_links(soup.get_text(separator=" ", strip=True), soup.find_all('a', href=True), base_url)
+
+        a_tags = soup.find_all('a', href=True)
+        for i in a_tags:
+            i.extract()
+
+        text_without_a_tag = soup.get_text(separator=" ", strip=True)
+        return OmegaParser3000.merge_text_and_links(text_without_a_tag, a_tags, base_url)
 
 class OmegaParser3000:
     @classmethod
