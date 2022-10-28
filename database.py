@@ -1,6 +1,7 @@
 import csv
 
 import itertools
+import os
 from typing import List, Tuple
 from xml.etree.ElementTree import ElementTree
 from loguru import logger
@@ -225,10 +226,12 @@ class DbActor:
     """
 
 
-    def __init__(self, in_memory: bool = True) -> None:
+    def __init__(self, in_memory: bool = False) -> None:
         if in_memory:
+            logger.success(os.listdir())
             self.import_db_to_memory_from_disk()
             self.db = DbSession()
+            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
         else:
             eng = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
             self.db = sessionmaker(autoflush=False, bind=eng)()

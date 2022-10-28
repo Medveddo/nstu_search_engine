@@ -22,9 +22,6 @@ class Searcher:
     def __init__(self) -> None:
         self.db = DbActor()
 
-    def search(self, query: str):
-        pass
-
     def create_marked_html_file(self, marked_html_filename, words, marked_words):
         marked_set = {}
         for i in tuple(marked_words):
