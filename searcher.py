@@ -8,10 +8,10 @@
 
 # Rank temp
 
-from typing import Dict, List
+from typing import Any, Dict, Iterable, List
 from loguru import logger
 from database import DbActor
-from entities import WordLocationsCombination
+from entities import ResultURL, WordLocationsCombination
 from entities import PageRankURL
 from utils import Decorators
 from dataclasses import dataclass
@@ -109,6 +109,7 @@ class PageRankerer:
 
     @Decorators.timing
     def calculate_ranks(self):
+        logger.info("Start calculating page ranks ...")
         url_ids = self.db.get_unique_urls_ids()
 
         page_ranks: Dict[int, PageRankURL] = dict()
@@ -144,3 +145,42 @@ class PageRankerer:
             logger.debug(pages[30])
 
         self.db.fill_page_rank(list(page_ranks.values()))
+
+
+        self.db.save_to_db_to_disk()
+        logger.success("Page ranks are calculated!")
+
+    def get_normalized_page_ranks_by_result_urls(self, urls: List[ResultURL]) -> List[ResultURL]:
+        urls_dict = {
+            url.url_id: url
+            for url 
+            in urls
+        }
+
+        # get max rank from table
+        max_rank = self.db.get_max_page_rank()
+
+        # logger.success(max_rank)
+        # get url_ids ranks
+        urls_with_page_rank = self.db.get_urls_with_page_ranks(
+            [url.url_id for url in urls]
+        )
+        # logger.debug(urls_with_page_rank)
+
+        # normalize
+        ratio = 1 / max_rank if max_rank >= 1 else max_rank / 1
+        logger.warning(f"{ratio=}")
+        for url in urls_with_page_rank:
+            url.page_rank_normalized_metric = url.page_rank_raw_metric * ratio
+
+        # logger.debug(urls_with_page_rank)
+        # return 
+
+
+        # modify and calc summary
+        for url in urls_with_page_rank:
+            url.distance_normalized_metric = urls_dict[url.url_id].distance_normalized_metric
+            url.total_rating = (url.page_rank_normalized_metric + url.distance_normalized_metric) / 2
+            
+        # logger.success(urls_with_page_rank)
+        return urls_with_page_rank

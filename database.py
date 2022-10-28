@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy import create_engine
 import sqlalchemy
 from sqlalchemy.orm import Session, sessionmaker
-from entities import Element, PageRankURL, WordLocationsCombination
+from entities import Element, PageRankURL, ResultURL, WordLocationsCombination
 from utils import Decorators
 
 from tabulate import tabulate
@@ -214,9 +214,20 @@ class DbActor:
     SELECT * FROM page_rank_main LIMIT 1
     """
 
+    SELECT_MAX_PAGE_RANK = """
+    SELECT rank FROM page_rank_main ORDER BY rank DESC LIMIT 1
+    """
+
+    GET_URLS_WITH_PAGE_RANK_IN_URL_IDS = """
+    SELECT url_list.urlId, url_list.url, page_rank_main.rank FROM url_list
+    INNER JOIN page_rank_main ON url_list.urlId = page_rank_main.fkUrlId
+    WHERE url_list.urlId IN {url_ids_list}
+    """
+
+
     def __init__(self, in_memory: bool = True) -> None:
         if in_memory:
-            # self.import_db_to_memory_from_disk()
+            self.import_db_to_memory_from_disk()
             self.db = DbSession()
         else:
             eng = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
@@ -474,3 +485,23 @@ class DbActor:
         if result is None:
             return True
         return False
+
+    def get_max_page_rank(self) -> float:
+        result = self.db.execute(self.SELECT_MAX_PAGE_RANK)
+        result = result.fetchone()[0]
+        return result
+
+    def get_urls_with_page_ranks(self, url_ids: List[int]) -> List[ResultURL]:
+        url_ids_list_str = str(url_ids).replace("[", "(").replace("]", ")")
+        result = self.db.execute(self.GET_URLS_WITH_PAGE_RANK_IN_URL_IDS.format(url_ids_list=url_ids_list_str))
+        result = result.fetchall()
+        
+        return [
+            ResultURL(
+                url_id=row[0],
+                url_name=row[1],
+                page_rank_raw_metric=row[2],
+            )
+            for row
+            in result
+        ]
