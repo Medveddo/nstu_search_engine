@@ -40,7 +40,7 @@ class Crawler:
         self.urls_to_crawl: List[LinkToGo] = url_list[:]
         self.crawled_urls: List[str] = []
         self.depth = depth
-        self.db = DbActor()
+        self.db = DbActor(in_memory=True)
         self.crawl_count = 0
         self.start_time = datetime.datetime.utcnow()
         self.error_processed_urls: List[str] = []

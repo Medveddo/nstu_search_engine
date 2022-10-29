@@ -10,6 +10,7 @@
 
 from typing import Any, Dict, Iterable, List
 from loguru import logger
+from sqlalchemy import false
 from database import DbActor
 from entities import ResultURL, WordLocationsCombination
 from entities import PageRankURL
@@ -19,8 +20,8 @@ from airium import Airium
 from random import randint
 
 class Searcher:
-    def __init__(self) -> None:
-        self.db = DbActor()
+    def __init__(self, in_memory=True) -> None:
+        self.db = DbActor(in_memory)
 
     def create_marked_html_file(self, marked_html_filename, words, marked_words):
         marked_set = {}
@@ -53,8 +54,8 @@ class Searcher:
         self.db.close()
 
 class PageRankerer:
-    def __init__(self) -> None:
-        self.db = DbActor()
+    def __init__(self, in_memory=False) -> None:
+        self.db = DbActor(in_memory)
 
     def close(self) -> None:
         self.db.close()

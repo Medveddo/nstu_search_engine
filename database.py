@@ -235,6 +235,7 @@ class DbActor:
         else:
             eng = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
             self.db = sessionmaker(autoflush=False, bind=eng)()
+            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
         self.url_ids_dict = dict()
     
     def import_db_to_memory_from_disk(self) -> None:

@@ -10,7 +10,7 @@ import glob
 class SearchProvider:
     @staticmethod
     def search(query: str):
-        ranker = PageRankerer()
+        ranker = PageRankerer(in_memory=True)
         searcher = Searcher()
 
         htmls_number = 5
@@ -21,7 +21,7 @@ class SearchProvider:
             os.remove(name)
 
         search_words = query.split(" ")
-        if len(search_words) != 2:
+        if len(search_words) < 2:
             return
         # search_words = ["человек", "новосибирск"]
         distanced_urls = ranker.distance_score(search_words)
