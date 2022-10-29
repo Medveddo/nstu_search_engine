@@ -164,7 +164,8 @@ class PageRankerer:
         max_rank = max([url.page_rank_raw_metric for url in urls_with_page_rank])
 
         # normalize
-        ratio = 1 / max_rank if max_rank >= 1 else max_rank / 1
+        ratio = 1 / max_rank 
+        logger.warning(max_rank)
         logger.warning(f"{ratio=}")
         for url in urls_with_page_rank:
             url.page_rank_normalized_metric = url.page_rank_raw_metric * ratio
@@ -178,5 +179,5 @@ class PageRankerer:
             url.distance_normalized_metric = urls_dict[url.url_id].distance_normalized_metric
             url.total_rating = (url.page_rank_normalized_metric + url.distance_normalized_metric) / 2
             
-        # logger.success(urls_with_page_rank)
+        logger.success(urls_with_page_rank)
         return urls_with_page_rank
