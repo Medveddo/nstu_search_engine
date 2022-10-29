@@ -32,7 +32,7 @@ def results():
         html = "<h1>Not found</h1>"
         return html
     html = ""
-    file_names = sorted(file_names, reverse=True)
+    file_names = sorted(file_names)
     for name in file_names:
         html += f'<a href="/{name}">{name}</a><br>'
     return html
