@@ -6,3 +6,4 @@ venv
 *.csv
 *.db-journal
 *.html
+*.ods*

@@ -3,7 +3,6 @@ import csv
 import itertools
 import os
 from typing import List, Tuple
-from xml.etree.ElementTree import ElementTree
 from loguru import logger
 from sqlalchemy import create_engine
 import sqlalchemy
@@ -19,7 +18,6 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL_MEMORY)
 raw_connection_memory = engine.raw_connection()
 
 DbSession = sessionmaker(autoflush=False, bind=engine)
-
 SQLALCHEMY_DATABASE_URL_FILE = "sqlite:///lab1.db"
 
 class DbCreator:
@@ -208,7 +206,6 @@ class DbActor:
     SET rank = (SELECT page_rank_temp.rank
                                 FROM page_rank_temp
                                 WHERE page_rank_temp.fkUrlId = page_rank_main.fkUrlId)
-
     """
 
     GET_PAGE_RANK_ONE_ROW = """
