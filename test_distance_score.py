@@ -54,6 +54,6 @@ class SearchProvider:
             for url in result_urls[:htmls_number]:
                 print(f"URL ({url.url_id}): {url.url_name}, total score: {url.total_rating:.3f} (page_rank={url.page_rank_normalized_metric:.3f}, distance={url.distance_normalized_metric:.3f})")
                 words = ranker.db.get_words_by_url(url.url_id)
-                searcher.create_marked_html_file(f"result_{url.url_id}_{url.url_name.removeprefix('http://').removeprefix('https://').split('/')[0]}_{url.total_rating:.2f}.html", words, search_words)
+                searcher.create_marked_html_file(f"result_{url.total_rating:.2f}_{url.url_id}_{url.url_name.removeprefix('http://').removeprefix('https://').split('/')[0]}.html", words, search_words)
         else:
             logger.info("No URS found :(")

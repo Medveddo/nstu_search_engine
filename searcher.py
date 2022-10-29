@@ -154,15 +154,14 @@ class PageRankerer:
             in urls
         }
 
-        # get max rank from table
-        max_rank = self.db.get_max_page_rank()
-
         # logger.success(max_rank)
         # get url_ids ranks
         urls_with_page_rank = self.db.get_urls_with_page_ranks(
             [url.url_id for url in urls]
         )
         # logger.debug(urls_with_page_rank)
+
+        max_rank = max([url.page_rank_raw_metric for url in urls_with_page_rank])
 
         # normalize
         ratio = 1 / max_rank if max_rank >= 1 else max_rank / 1
