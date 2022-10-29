@@ -6,19 +6,12 @@ from typing import List, Tuple
 from loguru import logger
 from sqlalchemy import create_engine
 import sqlalchemy
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from entities import Element, PageRankURL, ResultURL, WordLocationsCombination
 from utils import Decorators
 
 from tabulate import tabulate
 
-SQLALCHEMY_DATABASE_URL_MEMORY = "sqlite:///:memory:"
-# https://stackoverflow.com/questions/5831548/how-to-save-my-in-memory-database-to-hard-disk
-engine = create_engine(SQLALCHEMY_DATABASE_URL_MEMORY)
-raw_connection_memory = engine.raw_connection()
-
-DbSession = sessionmaker(autoflush=False, bind=engine)
-SQLALCHEMY_DATABASE_URL_FILE = "sqlite:///lab1.db"
 
 class DbCreator:
     CREATE_TABLE_WORD_LIST = """
@@ -60,15 +53,8 @@ class DbCreator:
         fkLinkId INT
     )
     """
-    CREATE_TABLE_PAGE_RANK_MAIN = """
-    CREATE TABLE IF NOT EXISTS page_rank_main (
-        id INTEGER PRIMARY KEY,
-        fkUrlId INT,
-        rank REAL
-    )
-    """
-    CREATE_TABLE_PAGE_RANK_TEMP = """
-    CREATE TABLE IF NOT EXISTS page_rank_temp (
+    CREATE_TABLE_PAGE_RANK = """
+    CREATE TABLE IF NOT EXISTS page_rank (
         id INTEGER PRIMARY KEY,
         fkUrlId INT,
         rank REAL
@@ -80,24 +66,20 @@ class DbCreator:
     """
 
     @classmethod
-    def initialize_db(cls) -> None:
-        session: Session = DbSession()
+    def initialize_db(cls, session) -> None:
         session.execute(cls.CREATE_TABLE_WORD_LIST)
         session.execute(cls.CREATE_TABLE_URL_LIST)
         session.execute(cls.CREATE_TABLE_WORD_LOCATION)
         session.execute(cls.CREATE_TABLE_LINK_BETWEEN_URL)
         session.execute(cls.CREATE_TABLE_LINK_WORD)
-        session.execute(cls.CREATE_TABLE_PAGE_RANK_MAIN)
-        session.execute(cls.CREATE_TABLE_PAGE_RANK_TEMP)
+        session.execute(cls.CREATE_TABLE_PAGE_RANK)
         
         result = session.execute(cls.SELECT_TABLES_COUNT)
         tables_count = result.fetchall()[0][0]
         logger.debug(f"Tables count: {tables_count}")
-        if tables_count != 7:
+        if tables_count != 6:
             logger.critical("Not enougth tables!!!")
             exit(1)
-
-        session.close()
 
 
 class DbActor:
@@ -159,7 +141,7 @@ class DbActor:
     """
 
     INSERT_IN_RANGE_RANK_MAIN = """
-    INSERT INTO page_rank_main(fkUrlId, rank) VALUES {list_of_values}
+    INSERT INTO page_rank(fkUrlId, rank) VALUES {list_of_values}
     """
 
     INSERT_IN_RANGE_RANK_TEMP = """
@@ -181,11 +163,11 @@ class DbActor:
     where fkFromUrlId = {url_id}) as count_part
     on count_part.url_id = urlid
     inner join
-    (select fkUrlId, rank from page_rank_main where fkUrlId = {url_id}) as rank_part
+    (select fkUrlId, rank from page_rank where fkUrlId = {url_id}) as rank_part
     on rank_part.fkUrlId = urlid
     inner join
-    (select from_url, from_rank, count(*) as count_from, inner_to_part.fkToUrlId from (select distinct fkFromUrlId as from_url, page_rank_main.rank as from_rank, fkToUrlId from link_between_url
-    inner join page_rank_main on from_url = page_rank_main.fkUrlId where fkToUrlId = {url_id}) as inner_to_part inner join link_between_url as lbu on lbu.fkFromUrlId = from_url GROUP by lbu.fkFromUrlId) as to_part
+    (select from_url, from_rank, count(*) as count_from, inner_to_part.fkToUrlId from (select distinct fkFromUrlId as from_url, page_rank.rank as from_rank, fkToUrlId from link_between_url
+    inner join page_rank on from_url = page_rank.fkUrlId where fkToUrlId = {url_id}) as inner_to_part inner join link_between_url as lbu on lbu.fkFromUrlId = from_url GROUP by lbu.fkFromUrlId) as to_part
     on to_part.fkToUrlId = urlid
     """
 
@@ -194,7 +176,7 @@ class DbActor:
     """
 
     GET_PAGE_RANK_BY_ID = """
-    SELECT rank FROM page_rank_main WHERE id = {id_}
+    SELECT rank FROM page_rank WHERE id = {id_}
     """
 
     SET_PAGE_RANK_BY_ID = """
@@ -202,50 +184,75 @@ class DbActor:
     """
 
     SYNC_TEMP_AND_MAIN_PAGE_RANKS = """
-    UPDATE page_rank_main
+    UPDATE page_rank
     SET rank = (SELECT page_rank_temp.rank
                                 FROM page_rank_temp
-                                WHERE page_rank_temp.fkUrlId = page_rank_main.fkUrlId)
+                                WHERE page_rank_temp.fkUrlId = page_rank.fkUrlId)
     """
 
     GET_PAGE_RANK_ONE_ROW = """
-    SELECT * FROM page_rank_main LIMIT 1
+    SELECT * FROM page_rank LIMIT 1
     """
 
     SELECT_MAX_PAGE_RANK = """
-    SELECT rank FROM page_rank_main ORDER BY rank DESC LIMIT 1
+    SELECT rank FROM page_rank ORDER BY rank DESC LIMIT 1
     """
 
     GET_URLS_WITH_PAGE_RANK_IN_URL_IDS = """
-    SELECT url_list.urlId, url_list.url, page_rank_main.rank FROM url_list
-    INNER JOIN page_rank_main ON url_list.urlId = page_rank_main.fkUrlId
+    SELECT url_list.urlId, url_list.url, page_rank.rank FROM url_list
+    INNER JOIN page_rank ON url_list.urlId = page_rank.fkUrlId
     WHERE url_list.urlId IN {url_ids_list}
     """
 
 
-    def __init__(self, in_memory: bool = False) -> None:
-        if in_memory:
-            logger.success(os.listdir())
-            self.import_db_to_memory_from_disk()
-            self.db = DbSession()
-            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
-        else:
-            eng = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
-            self.db = sessionmaker(autoflush=False, bind=eng)()
-            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
-        self.url_ids_dict = dict()
+    SQLALCHEMY_DATABASE_URL_MEMORY = "sqlite:///:memory:"
+    SQLALCHEMY_DATABASE_URL_FILE = "sqlite:///lab1.db"
     
-    def import_db_to_memory_from_disk(self) -> None:
-        engine_file = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
-        raw_connection_file = engine_file.raw_connection()
+
+    def __init__(self) -> None:
+        self.url_ids_dict = dict()
+
+        # https://stackoverflow.com/questions/5831548/how-to-save-my-in-memory-database-to-hard-disk
+
+        if "lab1.db" not in os.listdir():
+            logger.info("Db in disk not found")
+            
+            # Open db in memory
+            memory_engine = create_engine(self.SQLALCHEMY_DATABASE_URL_MEMORY)
+            self.raw_connection_memory = memory_engine.raw_connection()
+            DbSessionMemory = sessionmaker(autoflush=False, bind=memory_engine)
+            memory_session_ = DbSessionMemory()
+            
+            # Create tables
+            DbCreator.initialize_db(memory_session_)
+            self.db = memory_session_
+            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
+            return
+        
+        logger.info("Db in disk found")
+
+        # Open db in memory
+        memory_engine = create_engine(self.SQLALCHEMY_DATABASE_URL_MEMORY)
+        raw_connection_memory = memory_engine.raw_connection()
+        self.raw_connection_memory = raw_connection_memory
+        DbSessionMemory = sessionmaker(autoflush=False, bind=memory_engine)
+        memory_session_ = DbSessionMemory()
+
+            
+        file_engine = sqlalchemy.create_engine(self.SQLALCHEMY_DATABASE_URL_FILE)
+        raw_connection_file = file_engine.raw_connection()
         raw_connection_file.backup(raw_connection_memory.connection)
         raw_connection_file.close()
-        engine_file.dispose()
+        file_engine.dispose()
 
+        self.db = memory_session_
+        logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
+        return
+    
     def save_to_db_to_disk(self) -> None:
-        engine_file = sqlalchemy.create_engine(SQLALCHEMY_DATABASE_URL_FILE)
+        engine_file = sqlalchemy.create_engine(self.SQLALCHEMY_DATABASE_URL_FILE)
         raw_connection_file = engine_file.raw_connection()
-        raw_connection_memory.backup(raw_connection_file.connection)
+        self.raw_connection_memory.backup(raw_connection_file.connection)
         raw_connection_file.close()
         engine_file.dispose()
 
@@ -403,8 +410,7 @@ class DbActor:
         return result[0]
 
     def fill_page_rank(self, page_ranks: List[PageRankURL]) -> None:
-        self.db.execute("delete from page_rank_main")
-        self.db.execute("delete from page_rank_temp")
+        self.db.execute("delete from page_rank")
         self.db.commit()
 
         list_of_values = ""

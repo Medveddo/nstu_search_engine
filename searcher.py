@@ -21,7 +21,7 @@ from random import randint
 
 class Searcher:
     def __init__(self, in_memory=True) -> None:
-        self.db = DbActor(in_memory)
+        self.db = DbActor()
 
     def create_marked_html_file(self, marked_html_filename, words, marked_words):
         marked_set = {}
@@ -55,7 +55,7 @@ class Searcher:
 
 class PageRankerer:
     def __init__(self, in_memory=False) -> None:
-        self.db = DbActor(in_memory)
+        self.db = DbActor()
 
     def close(self) -> None:
         self.db.close()
