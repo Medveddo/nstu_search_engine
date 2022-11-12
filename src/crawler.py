@@ -1,39 +1,45 @@
 import asyncio
+import contextlib
+import csv
 import datetime
+import os
+import re
+import threading
 import time
 from typing import List
-import bs4
-import aiohttp
-import re
 
+import aiohttp
+import bs4
 import requests
 from bs4 import BeautifulSoup
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 
-import csv
+from src.database import DbActor
+from src.entities import Element, FetchedUrl, LinkToGo
+from src.settings import CSV_STAT_FILENAME, DATABASE_FILENAME
+from src.utils import Decorators
 
-from database import DbActor
-from entities import Element, LinkToGo, FetchedUrl
-from utils import Decorators
-import threading
 
 class Crawler:
     START_URL_LIST = [
         LinkToGo("https://ngs.ru/"),
         LinkToGo("https://lenta.ru/"),
         LinkToGo("https://news.mail.ru/"),
-        # LinkToGo("http://deb.debian.org/"),
-        # LinkToGo("http://example.com/"),
-        # LinkToGo(
-        #     "https://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%B3%D0%BB%D0%B0%D0%B2%D0%BD%D0%B0%D1%8F_%D1%81%D1%82%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0"
-        # ),
     ]
     MAX_DEPTH = 2
-    SLEEP_TIMEOUT = 0.25
+    FETCH_SLEEP_INTERVAL = 0.25
     MAX_RETRIES_COUNT = 3
+    FETCH_BATCH_SIZE = 30
+    FETCH_TOTAL_TIMEOUT = 10
+    FETCH_CONNECT_TIMEOUT = 2
+    IDLE_WORK_SLEEP_INTERVAL = 5
+    IDLE_COUNT_BEFORE_EXIT = 3
+    STAT_INTERVAL = 2
 
-    def __init__(self, url_list: List[LinkToGo]=START_URL_LIST, depth=MAX_DEPTH) -> None:
+    def __init__(
+        self, url_list: List[LinkToGo] = START_URL_LIST, depth=MAX_DEPTH
+    ) -> None:
         for url in url_list:
             url.link = url.link.strip("/")
         self.start_url_list = url_list[:]
@@ -65,6 +71,7 @@ class Crawler:
 
     @Decorators.timing
     def start_crawl(self):
+        logger.info(f"Starting web crawler ... urls_to_crawl={self.urls_to_crawl}")
         self.create_stat_csv()
         try:
             fetch_thread = threading.Thread(target=self.async_fetch_urls)
@@ -74,9 +81,9 @@ class Crawler:
             while True:
                 if not self.pages_to_process:
                     logger.debug(f"Empty pages to process - ({idle_counter}) Sleep ...")
-                    time.sleep(5)
+                    time.sleep(self.IDLE_WORK_SLEEP_INTERVAL)
                     idle_counter += 1
-                    if idle_counter >= 8:
+                    if idle_counter >= self.IDLE_COUNT_BEFORE_EXIT:
                         break
                     continue
                 try:
@@ -98,7 +105,9 @@ class Crawler:
                 f"Finished crawl. Crawled pages: {self.crawl_count}. Time ellapsed: {(datetime.datetime.utcnow() - self.start_time).seconds / 60 :.2f} min. Started from: {self.start_url_list}"
             )
             if self.error_processed_urls:
-                logger.warning(f"Unprocessed urls ({len(self.error_processed_urls)}): {self.error_processed_urls[:3]} ... {self.error_processed_urls[-3:]}")
+                logger.warning(
+                    f"Unprocessed urls ({len(self.error_processed_urls)}): {self.error_processed_urls[:3]} ... {self.error_processed_urls[-3:]}"
+                )
             self.db.save_to_db_to_disk()
             self.db.close()
 
@@ -108,10 +117,9 @@ class Crawler:
             asyncio.run(self.fetch_urls())
         except (KeyboardInterrupt, RuntimeError):
             logger.info("Finished fetch thread")
-        
+
     async def fetch_urls(self):
         idle_counter = 0
-        batch_size = 30
         while True:
             if self.stop_flag:
                 self.error_processed_urls.extend(self.urls_to_crawl)
@@ -119,27 +127,36 @@ class Crawler:
 
             if not self.urls_to_crawl:
                 logger.debug(f"Empty urls to fetch ({idle_counter}). Sleeping ...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(self.IDLE_WORK_SLEEP_INTERVAL)
                 idle_counter += 1
-                if idle_counter >= 5:
+                if idle_counter >= self.IDLE_COUNT_BEFORE_EXIT:
                     break
                 continue
-            
-            urls_batch: List[LinkToGo] = self.urls_to_crawl[:batch_size]
-            self.urls_to_crawl = self.urls_to_crawl[batch_size:]
+
+            urls_batch: List[LinkToGo] = self.urls_to_crawl[: self.FETCH_BATCH_SIZE]
+            # fmt: off
+            self.urls_to_crawl = self.urls_to_crawl[self.FETCH_BATCH_SIZE:]
+            # fmt: on
 
             async def fetch(session: aiohttp.ClientSession, link: LinkToGo):
                 retries_count = 0
-                while retries_count < 3:
+                while retries_count < self.MAX_RETRIES_COUNT:
                     try:
                         async with session.get(link.link) as response:
                             text = await response.text()
                             logger.debug(f"fetched {link.link}")
-                            return FetchedUrl(url=link.link, text=text, depth=link.depth)
-                    except (aiohttp.ServerTimeoutError, aiohttp.ServerConnectionError, aiohttp.ClientConnectionError, asyncio.exceptions.TimeoutError) as e:
+                            return FetchedUrl(
+                                url=link.link, text=text, depth=link.depth
+                            )
+                    except (
+                        aiohttp.ServerTimeoutError,
+                        aiohttp.ServerConnectionError,
+                        aiohttp.ClientConnectionError,
+                        asyncio.exceptions.TimeoutError,
+                    ) as e:
                         retries_count += 1
                         logger.warning(f"{link.link} - {repr(e)} - {retries_count}")
-                        await asyncio.sleep(0.25)
+                        await asyncio.sleep(self.FETCH_SLEEP_INTERVAL)
                     except (aiohttp.TooManyRedirects, UnicodeDecodeError):
                         break
                     except Exception as e:
@@ -151,16 +168,23 @@ class Crawler:
                 logger.error(f"Max retries exceed - {link.link}")
                 return FetchedUrl(url="", text="")
 
-            timeout = aiohttp.ClientTimeout(total=10, connect=2)
+            timeout = aiohttp.ClientTimeout(
+                total=self.FETCH_TOTAL_TIMEOUT, connect=self.FETCH_CONNECT_TIMEOUT
+            )
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                results: List[FetchedUrl] = await asyncio.gather(*[fetch(session, url) for url in urls_batch], return_exceptions=True)
-                logger.success(f"Fetched {len(results)} urls")
+                results: List[FetchedUrl] = await asyncio.gather(
+                    *[fetch(session, url) for url in urls_batch], return_exceptions=True
+                )
                 results = [result for result in results if result.text]
                 self.pages_to_process.extend(results)
-            
-            logger.info(f"End fetch iteration. urls_to_fetch={len(self.urls_to_crawl)} pages_to_process={len(self.pages_to_process)}")
+
+            logger.info(
+                f"End fetch iteration (batch={self.FETCH_BATCH_SIZE}). "
+                f"urls_to_fetch={len(self.urls_to_crawl)} "
+                f"pages_to_process={len(self.pages_to_process)}"
+            )
             idle_counter = 0
-            await asyncio.sleep(5)          
+            await asyncio.sleep(self.IDLE_WORK_SLEEP_INTERVAL)
 
         logger.info("Finishing fetch thread ...")
 
@@ -185,7 +209,7 @@ class Crawler:
     def _crawl_iteration(self, fetched_url: FetchedUrl):
         current_depth = fetched_url.depth
         url_to_process = fetched_url.url
-        if self.crawl_count and self.crawl_count % 10 == 0:
+        if self.crawl_count and self.crawl_count % self.STAT_INTERVAL == 0:
             self.db.get_stat(self.crawl_count)
         self.crawl_count += 1
         logger.debug(
@@ -232,17 +256,18 @@ class ParseUtils:
     @staticmethod
     def _get_childs_texts_turbo(text: str, base_url: str) -> List[Element]:
         soup = BeautifulSoup(text, "html.parser")
-        for data in soup(['style', 'script', 'meta', 'template']):
+        for data in soup(["style", "script", "meta", "template"]):
             data.decompose()
 
         return OmegaParser3000.merge_text_and_links(soup.find_all(), base_url)
+
 
 class OmegaParser3000:
     @classmethod
     def merge_text_and_links(cls, tags: List[bs4.Tag], base_url: str) -> List[Element]:
         base_url = base_url.strip("/")
         output_elements: List[Element] = []
-        
+
         for i in tags:
             tag_text = i.find(text=True, recursive=False)
             if not (tag_text is None):
@@ -251,13 +276,18 @@ class OmegaParser3000:
                     print(tag_text)
 
                 href = ""
-                if (i.name == 'a'):
+                if i.name == "a":
                     href = i.get("href")
                     if not (href is None):
-                        if "mailto:" in href or "tel:" in href or href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf")) or not href.startswith("http"):
+                        if (
+                            "mailto:" in href
+                            or "tel:" in href
+                            or href.endswith((".jpg", ".png", ".gif", ".jpeg", ".pdf"))
+                            or not href.startswith("http")
+                        ):
                             href = ""
-                        href = href.strip("/")        
-                
+                        href = href.strip("/")
+
                 for j, word in enumerate(words, start=len(output_elements)):
                     output_elements.append(Element(word=word, location=j, href=href))
 
@@ -265,7 +295,15 @@ class OmegaParser3000:
 
     @classmethod
     def text_to_wordlist(cls, text: str) -> List[str]:
-        words = list(filter(None, re.split("[\W\d]+", text, flags=re.UNICODE)))
+        words = list(filter(None, re.split("[\W\d]+", text, flags=re.UNICODE)))  # noqa
         for i, word in enumerate(words):
             words[i] = word.lower()
         return words
+
+
+def start_crawler():
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(DATABASE_FILENAME)
+        os.remove(CSV_STAT_FILENAME)
+
+    Crawler().start_crawl()

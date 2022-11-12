@@ -4,13 +4,26 @@ Implementation of web crawler that saves indexed data to relational database for
 
 ## Usage
 
-1. Edit START_URL_LIST (crawler.py#L16)
+1. Edit START_URL_LIST (src/crawler.py#L25)
 
-2. Then run main.py
+2. Start crawler
 
 ```shell
-python main.py
+python main.py start_crawler
 ```
+
+3. Run ranks calculation
+
+```shell
+python main.py calc_ranks
+```
+
+4. Start search system to query results
+
+```shell
+python main.py run_flask
+```
+
 
 ## SQL Queries
 

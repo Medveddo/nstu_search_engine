@@ -1,16 +1,17 @@
 import csv
-
 import itertools
 import os
 from typing import List, Tuple
+
+import sqlalchemy
 from loguru import logger
 from sqlalchemy import create_engine
-import sqlalchemy
 from sqlalchemy.orm import sessionmaker
-from entities import Element, PageRankURL, ResultURL, WordLocationsCombination
-from utils import Decorators
-
 from tabulate import tabulate
+
+from src.entities import Element, PageRankURL, ResultURL, WordLocationsCombination
+from src.settings import DATABASE_FILENAME
+from src.utils import Decorators
 
 
 class DbCreator:
@@ -65,6 +66,8 @@ class DbCreator:
     SELECT COUNT(name) FROM sqlite_master WHERE type='table'
     """
 
+    TOTAL_TABLES_COUNT = 6
+
     @classmethod
     def initialize_db(cls, session) -> None:
         session.execute(cls.CREATE_TABLE_WORD_LIST)
@@ -73,12 +76,13 @@ class DbCreator:
         session.execute(cls.CREATE_TABLE_LINK_BETWEEN_URL)
         session.execute(cls.CREATE_TABLE_LINK_WORD)
         session.execute(cls.CREATE_TABLE_PAGE_RANK)
-        
+
         result = session.execute(cls.SELECT_TABLES_COUNT)
-        tables_count = result.fetchall()[0][0]
-        logger.debug(f"Tables count: {tables_count}")
-        if tables_count != 6:
-            logger.critical("Not enougth tables!!!")
+        tables_count = result.fetchone()[0]
+        if tables_count != cls.TOTAL_TABLES_COUNT:
+            logger.critical(
+                f"Not enougth tables! Need: {cls.TOTAL_TABLES_COUNT}. Got: {tables_count}"
+            )
             exit(1)
 
 
@@ -120,20 +124,20 @@ class DbActor:
     """
 
     SELECT_TABLE_SIZE_STATS = """
-    SELECT COUNT(*), 'link_between' as temp_field FROM link_between_url 
-    UNION 
+    SELECT COUNT(*), 'link_between' as temp_field FROM link_between_url
+    UNION
     SELECT COUNT(*), 'link_word' as temp_field FROM link_word
-    UNION 
+    UNION
     SELECT COUNT(*), 'url_list' as temp_field FROM url_list
-    UNION 
+    UNION
     SELECT COUNT(*), 'word_list' as temp_field FROM word_list
-    UNION 
+    UNION
     SELECT COUNT(*), 'word_location' as temp_field FROM word_location
     """
 
     GET_UNIQUE_WORDS_COUNT = """
     SELECT COUNT(unique_word) from
-    (SELECT DISTINCT word as unique_word FROM word_list) 
+    (SELECT DISTINCT word as unique_word FROM word_list)
     """
 
     SELECT_UNIQUE_URL_IDS = """
@@ -204,31 +208,28 @@ class DbActor:
     WHERE url_list.urlId IN {url_ids_list}
     """
 
-
     SQLALCHEMY_DATABASE_URL_MEMORY = "sqlite:///:memory:"
-    SQLALCHEMY_DATABASE_URL_FILE = "sqlite:///lab1.db"
-    
+    SQLALCHEMY_DATABASE_URL_FILE = f"sqlite:///{DATABASE_FILENAME}"
 
     def __init__(self) -> None:
         self.url_ids_dict = dict()
 
         # https://stackoverflow.com/questions/5831548/how-to-save-my-in-memory-database-to-hard-disk
 
-        if "lab1.db" not in os.listdir():
+        if DATABASE_FILENAME not in os.listdir():
             logger.info("Db in disk not found")
-            
+
             # Open db in memory
             memory_engine = create_engine(self.SQLALCHEMY_DATABASE_URL_MEMORY)
             self.raw_connection_memory = memory_engine.raw_connection()
             DbSessionMemory = sessionmaker(autoflush=False, bind=memory_engine)
             memory_session_ = DbSessionMemory()
-            
+
             # Create tables
             DbCreator.initialize_db(memory_session_)
             self.db = memory_session_
-            logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
             return
-        
+
         logger.info("Db in disk found")
 
         # Open db in memory
@@ -238,7 +239,6 @@ class DbActor:
         DbSessionMemory = sessionmaker(autoflush=False, bind=memory_engine)
         memory_session_ = DbSessionMemory()
 
-            
         file_engine = sqlalchemy.create_engine(self.SQLALCHEMY_DATABASE_URL_FILE)
         raw_connection_file = file_engine.raw_connection()
         raw_connection_file.backup(raw_connection_memory.connection)
@@ -246,9 +246,8 @@ class DbActor:
         file_engine.dispose()
 
         self.db = memory_session_
-        logger.critical(self.db.execute(DbCreator.SELECT_TABLES_COUNT).fetchone()[0])
         return
-    
+
     def save_to_db_to_disk(self) -> None:
         engine_file = sqlalchemy.create_engine(self.SQLALCHEMY_DATABASE_URL_FILE)
         raw_connection_file = engine_file.raw_connection()
@@ -261,7 +260,9 @@ class DbActor:
 
     @staticmethod
     def append_csv_stat(data: List[Tuple[str, int]], urls_crawled: int):
-        with open("stat.csv", "a") as csv_file:
+        with open(
+            "stat.csv", "a", newline=""
+        ) as csv_file:  # todo remove newline in linux
             writer = csv.writer(csv_file)
             writer.writerow(
                 (
@@ -281,14 +282,14 @@ class DbActor:
         data = []
         for row in result:
             data.append((row[1], row[0]))
-        
+
         unique_words_count = self.db.execute(self.GET_UNIQUE_WORDS_COUNT)
         unique_words_count = unique_words_count.fetchone()[0]
         data.append(("unique_words_count", unique_words_count))
 
-        logger.success(
-            f'\n\tCrawled count: {urls_crawled}\n{tabulate(data, headers=["table_name", "rows"])}'
-        )
+        # logger.success(
+        #     f'\n\tCrawled count: {urls_crawled}\n{tabulate(data, headers=["table_name", "rows"])}'
+        # )
         self.append_csv_stat(data, urls_crawled)
 
     def _get_last_word_id(self) -> int:
@@ -304,7 +305,7 @@ class DbActor:
     def insert_url(self, url: str) -> int:
         already_in_db = self.db.execute(
             f"SELECT urlId FROM url_list WHERE url = '{url}'"
-        ).fetchone()        
+        ).fetchone()
         if already_in_db:
             return already_in_db[0]
 
@@ -330,7 +331,7 @@ class DbActor:
                 last_url_id += 1
                 self.url_ids_dict[element.href] = last_url_id
                 list_of_values += f"('{element.href}'),"
-        
+
         for element in elements:
             if not element.href:
                 continue
@@ -417,7 +418,9 @@ class DbActor:
         for page in page_ranks:
             list_of_values += f"({page.id}, {page.rank}),"
         list_of_values = list_of_values.strip(",")
-        self.db.execute(self.INSERT_IN_RANGE_RANK_MAIN.format(list_of_values=list_of_values))
+        self.db.execute(
+            self.INSERT_IN_RANGE_RANK_MAIN.format(list_of_values=list_of_values)
+        )
         self.db.commit()
 
     def fill_temp_page_rank(self, entities: List[PageRankURL]) -> None:
@@ -425,30 +428,38 @@ class DbActor:
         for entity in entities:
             list_of_values += f"({entity.id}, {entity.rank}),"
         list_of_values = list_of_values.strip(",")
-        self.db.execute(self.INSERT_IN_RANGE_RANK_TEMP.format(list_of_values=list_of_values))
+        self.db.execute(
+            self.INSERT_IN_RANGE_RANK_TEMP.format(list_of_values=list_of_values)
+        )
         self.db.commit()
 
     def get_from_urls_by_to(self, fk_to_url_id: int) -> List[int]:
-        result = self.db.execute(self.SELECT_ALL_REFERENCES_TO_URL_BY_ID.format(link_to_fk=fk_to_url_id))
+        result = self.db.execute(
+            self.SELECT_ALL_REFERENCES_TO_URL_BY_ID.format(link_to_fk=fk_to_url_id)
+        )
         result = result.fetchall()
         return list(itertools.chain(*result))
 
     def get_from_url_count(self, fk_from_url_id: int) -> int:
-        result = self.db.execute(self.GET_URL_LINK_COUNT.format(fk_from_url_id=fk_from_url_id)).fetchone()[0]
+        result = self.db.execute(
+            self.GET_URL_LINK_COUNT.format(fk_from_url_id=fk_from_url_id)
+        ).fetchone()[0]
         return result
 
     def get_page_rank_by_id(self, id_: int) -> float:
         result = self.db.execute(self.GET_PAGE_RANK_BY_ID.format(id_=id_)).fetchone()[0]
         return result
-    
+
     def sync_main_and_temp_rank_tables(self) -> None:
         self.db.execute(self.SYNC_TEMP_AND_MAIN_PAGE_RANKS)
         self.db.commit()
 
     def get_words_by_url(self, url_id):
-        result = self.db.execute(self.SELECT_ALL_WORDS_BY_URL.format(url_id=url_id)).fetchall()
+        result = self.db.execute(
+            self.SELECT_ALL_WORDS_BY_URL.format(url_id=url_id)
+        ).fetchall()
         return list(zip(*result))[0]
-        
+
     # get combinations of all word locations from list on all avaliable urls
     # returns WordLocationsCombination or null if words not specified
     def get_words_location_combinations(self, words: List[str]):
@@ -467,8 +478,8 @@ class DbActor:
                 f"(select {word}, fkurlid as {word}_url, location as {word}_location from word_location "
                 f"inner join (select wordid as {word} from word_list where word = '{word}') as word{i} on word{i}.{word} = fkwordid) "
             )
-            if (i > 0):
-                 query += f"on {words[i-1]}_url = {words[i]}_url"
+            if i > 0:
+                query += f"on {words[i-1]}_url = {words[i]}_url"
 
         result = self.db.execute(query).fetchall()
         self.db.commit()
@@ -479,11 +490,13 @@ class DbActor:
             for j in range(len(i) - 1):
                 locations_list.append(i[j + 1])
             combinations_list.append(WordLocationsCombination(i[0], locations_list))
-        
+
         return combinations_list
 
     def get_url_page_rank_info(self, url_id):
-        result = self.db.execute(self.SELECT_URL_RANK_INFO.format(url_id=url_id)).fetchall()
+        result = self.db.execute(
+            self.SELECT_URL_RANK_INFO.format(url_id=url_id)
+        ).fetchall()
         return result
 
     def is_page_rank_table_empty(self) -> bool:
@@ -500,15 +513,20 @@ class DbActor:
 
     def get_urls_with_page_ranks(self, url_ids: List[int]) -> List[ResultURL]:
         url_ids_list_str = str(url_ids).replace("[", "(").replace("]", ")")
-        result = self.db.execute(self.GET_URLS_WITH_PAGE_RANK_IN_URL_IDS.format(url_ids_list=url_ids_list_str))
+        result = self.db.execute(
+            self.GET_URLS_WITH_PAGE_RANK_IN_URL_IDS.format(
+                url_ids_list=url_ids_list_str
+            )
+        )
         result = result.fetchall()
-        
+
+        logger.critical(len(result))
+
         return [
             ResultURL(
                 url_id=row[0],
                 url_name=row[1],
                 page_rank_raw_metric=row[2],
             )
-            for row
-            in result
+            for row in result
         ]

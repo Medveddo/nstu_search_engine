@@ -1,7 +1,8 @@
-from functools import wraps
+import os
 import time
+from functools import wraps
 
-TIMING = True
+TIMING = os.getenv("MEASURE_TIME", 0)
 
 
 class Decorators:
