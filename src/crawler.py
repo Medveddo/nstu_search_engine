@@ -11,7 +11,7 @@ from typing import List
 import aiohttp
 import bs4
 import requests
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -258,9 +258,6 @@ class ParseUtils:
         soup = BeautifulSoup(text, "html.parser")
         for data in soup(["style", "script", "meta", "template"]):
             data.decompose()
-
-        for element in soup(text=lambda text: isinstance(text, Comment)):
-            element.extract()
 
         return OmegaParser3000.merge_text_and_links(soup.find_all(), base_url)
 
