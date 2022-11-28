@@ -17,7 +17,7 @@ class Searcher:
         ranker = PageRankerer()
         searcher = FancyHTMLer()
 
-        htmls_number = 5
+        htmls_number = 10
 
         with contextlib.suppress(FileExistsError):
             os.mkdir("search_results")
@@ -65,7 +65,7 @@ class Searcher:
                 )
                 words = ranker.db.get_words_by_url(url.url_id)
                 searcher.create_marked_html_file(
-                    f"result_{i}_{url.total_rating:.2f}_{url.url_id}_{url.url_name.removeprefix('http://').removeprefix('https://').split('/')[0].replace('?','')}.html",
+                    f"result_{url.total_rating:.3f}_{url.page_rank_normalized_metric:.3f}_{url.distance_normalized_metric:.3f}_{url.url_id}_{url.url_name.removeprefix('http://').removeprefix('https://').split('/')[0].replace('?','')}.html",
                     words,
                     search_words,
                 )

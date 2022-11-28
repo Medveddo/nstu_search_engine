@@ -31,7 +31,7 @@ def results():
         html = "<h1>Not found</h1>"
         return html
     html = ""
-    file_names = sorted(file_names)
+    file_names = sorted(file_names, reverse=True)
     for name in file_names:
         name = name.removeprefix("search_results").removeprefix("\\").removeprefix("/")
         html += f'<a href="/{name}">{name}</a><br>'
