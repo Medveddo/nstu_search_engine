@@ -43,7 +43,7 @@ class PageRankerer:
                     for k in range(len(j.word_locations) - 1):
                         diff = abs(j.word_locations[k] - j.word_locations[k - 1])
                         local_distance += diff
-                if i[1] > local_distance:
+                if i[1] < local_distance:
                     i[1] = local_distance
 
         return self.normalized_score(min_distance_list)
